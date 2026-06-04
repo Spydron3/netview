@@ -189,7 +189,8 @@ def _run_topo_scan() -> None:
             else:
                 mac_count  = len(data.get("mac_table", []))
                 lldp_count = len(data.get("lldp_neighbors", []))
-                _tlog(f"  FDB entries: {mac_count}   LLDP neighbours: {lldp_count}")
+                mac_label  = "ARP entries" if data.get("arp_fallback") else "FDB entries"
+                _tlog(f"  {mac_label}: {mac_count}   LLDP neighbours: {lldp_count}")
 
             with get_db() as db:
                 switch = db.get(Switch, sw["id"])

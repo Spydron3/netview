@@ -20,6 +20,8 @@ _IF_DESCR         = "1.3.6.1.2.1.2.2.1.2"     # ifDescr (fallback)
 _LLDP_REM_CHASSIS = "1.0.8802.1.1.2.1.4.1.1.5"  # lldpRemChassisId (often MAC)
 _LLDP_REM_PORT    = "1.0.8802.1.1.2.1.4.1.1.8"  # lldpRemPortDesc
 _LLDP_REM_SYSNAME = "1.0.8802.1.1.2.1.4.1.1.9"  # lldpRemSysName
+_ARP_PHYS_ADDR    = "1.3.6.1.2.1.4.22.1.2"       # ipNetToMediaPhysAddress (ifIndex.ip → MAC)
+_ARP_TYPE         = "1.3.6.1.2.1.4.22.1.4"       # ipNetToMediaType (2=invalid)
 
 
 # ── low-level walk ────────────────────────────────────────────────────────────
@@ -196,6 +198,44 @@ def poll_switch(host: str, community: str = "public") -> dict:
         })
 
     result["mac_table"] = mac_table
+
+    # 3b ── ARP table fallback (ipNetToMediaTable) when Bridge MIB is absent
+    if not mac_table:
+        arp_types: dict[str, int] = {}
+        for oid, val in _walk(host, community, _ARP_TYPE).items():
+            suffix = _oid_suffix(oid, _ARP_TYPE)
+            v = _int(val)
+            if v is not None:
+                arp_types[suffix] = v
+
+        arp_table: list[dict] = []
+        for oid, val in _walk(host, community, _ARP_PHYS_ADDR).items():
+            suffix = _oid_suffix(oid, _ARP_PHYS_ADDR)
+            if arp_types.get(suffix) == 2:  # invalid entry
+                continue
+            parts = suffix.split(".")
+            if len(parts) < 5:
+                continue
+            try:
+                ifidx = int(parts[0])
+                ip = ".".join(parts[1:5])
+            except ValueError:
+                continue
+            if ip == host:
+                continue
+            mac = _hex_to_mac(val)
+            if not mac:
+                continue
+            port_name = if_names.get(ifidx, f"if{ifidx}")
+            arp_table.append({
+                "mac": mac,
+                "port_name": port_name,
+                "port_index": ifidx,
+            })
+
+        if arp_table:
+            result["mac_table"] = arp_table
+            result["arp_fallback"] = True
 
     # 4 ── LLDP neighbours
     # OID suffix after column OID: timeMark.localPortNum.remoteIndex
