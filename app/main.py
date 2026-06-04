@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from database import get_db, get_setting, init_db, set_setting
+from lldp_scanner import listen_lldp
 from models import Device, ScanRun, Setting, Switch, TopologyLink
 from scanner import get_network_range, scan_network
 from snmp_scanner import poll_switch
@@ -52,13 +53,44 @@ def _run_scan() -> None:
 
         nr = get_setting("network_range") or None
         ps = get_setting("port_scan_enabled", "true").lower() == "true"
-        devices, network_range = scan_network(network_range=nr, port_scan=ps)
+
+        # Start passive LLDP capture in background while nmap runs
+        _lldp_stop = threading.Event()
+        _lldp_results: list[dict] = []
+        def _lldp_worker():
+            _lldp_results.extend(listen_lldp(duration=120, stop_event=_lldp_stop))
+        lldp_thread = threading.Thread(target=_lldp_worker, daemon=True, name="lldp-capture")
+        lldp_thread.start()
+
+        try:
+            devices, network_range = scan_network(network_range=nr, port_scan=ps)
+        finally:
+            _lldp_stop.set()
+            lldp_thread.join(timeout=5)
+
+        # Build LLDP lookup indexes
+        lldp_by_mac = {r["src_mac"].lower(): r for r in _lldp_results if r.get("src_mac")}
+        lldp_by_ip  = {r["mgmt_ip"]: r for r in _lldp_results if r.get("mgmt_ip")}
+        if _lldp_results:
+            logger.info("LLDP captured %d device(s)", len(_lldp_results))
+
         now = datetime.utcnow()
 
         with get_db() as db:
             db.execute(sa.update(Device).values(is_online=False))
 
             for d in devices:
+                # Enrich with LLDP data if available
+                lldp = lldp_by_mac.get((d["mac_address"] or "").lower()) \
+                    or lldp_by_ip.get(d["ip_address"])
+                if lldp:
+                    if not d["hostname"] and lldp.get("system_name"):
+                        d["hostname"] = lldp["system_name"]
+                    if not d["os_info"] and lldp.get("system_desc"):
+                        d["os_info"] = lldp["system_desc"]
+                    if not d["mac_address"] and lldp.get("chassis_mac"):
+                        d["mac_address"] = lldp["chassis_mac"]
+
                 existing = db.execute(
                     sa.select(Device).where(Device.ip_address == d["ip_address"])
                 ).scalar_one_or_none()
@@ -74,6 +106,8 @@ def _run_scan() -> None:
                         existing.hostname = d["hostname"]
                     if d["vendor"]:
                         existing.vendor = d["vendor"]
+                    if d["os_info"] and not existing.os_info:
+                        existing.os_info = d["os_info"]
                 else:
                     db.add(
                         Device(
