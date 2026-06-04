@@ -11,8 +11,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from database import get_db, init_db
-from models import Device, ScanRun
+from database import get_db, get_setting, init_db, set_setting
+from models import Device, ScanRun, Setting
 from scanner import get_network_range, scan_network
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -39,7 +39,9 @@ def _run_scan() -> None:
             db.flush()
             scan_id = run.id
 
-        devices, network_range = scan_network()
+        nr = get_setting("network_range") or None
+        ps = get_setting("port_scan_enabled", "true").lower() == "true"
+        devices, network_range = scan_network(network_range=nr, port_scan=ps)
         now = datetime.utcnow()
 
         with get_db() as db:
@@ -117,7 +119,7 @@ def _run_scan() -> None:
 async def lifespan(app: FastAPI):
     init_db()
 
-    interval = int(os.environ.get("SCAN_INTERVAL", "300"))
+    interval = int(get_setting("scan_interval", os.environ.get("SCAN_INTERVAL", "300")))
     _scheduler.add_job(_run_scan, "interval", seconds=interval, id="network_scan")
     _scheduler.start()
 
@@ -185,6 +187,36 @@ def api_device(device_id: int):
         if not d:
             raise HTTPException(status_code=404, detail="Device not found")
         return _device_to_dict(d)
+
+
+class SettingsUpdate(BaseModel):
+    scan_interval: int | None = None   # seconds
+    port_scan_enabled: bool | None = None
+    network_range: str | None = None
+
+
+@app.get("/api/settings")
+def api_get_settings():
+    with get_db() as db:
+        rows = db.execute(sa.select(Setting)).scalars().all()
+        return {r.key: r.value for r in rows}
+
+
+@app.put("/api/settings")
+def api_put_settings(body: SettingsUpdate):
+    if body.scan_interval is not None:
+        if body.scan_interval < 30:
+            raise HTTPException(status_code=422, detail="scan_interval must be >= 30 seconds")
+        set_setting("scan_interval", str(body.scan_interval))
+        _scheduler.reschedule_job("network_scan", trigger="interval", seconds=body.scan_interval)
+
+    if body.port_scan_enabled is not None:
+        set_setting("port_scan_enabled", "true" if body.port_scan_enabled else "false")
+
+    if body.network_range is not None:
+        set_setting("network_range", body.network_range.strip())
+
+    return {"status": "ok"}
 
 
 class DeviceUpdate(BaseModel):

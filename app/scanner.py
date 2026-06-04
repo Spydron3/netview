@@ -84,11 +84,14 @@ def _parse_host(nm: nmap.PortScanner, host: str) -> dict:
     return device
 
 
-def scan_network(network_range: str | None = None) -> tuple[list[dict], str]:
+def scan_network(
+    network_range: str | None = None,
+    port_scan: bool | None = None,
+) -> tuple[list[dict], str]:
     if network_range is None:
         network_range = get_network_range()
-
-    port_scan = os.environ.get("PORT_SCAN_ENABLED", "true").lower() == "true"
+    if port_scan is None:
+        port_scan = os.environ.get("PORT_SCAN_ENABLED", "true").lower() == "true"
     logger.info("Scanning %s (port_scan=%s)", network_range, port_scan)
 
     nm = nmap.PortScanner()

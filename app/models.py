@@ -23,6 +23,13 @@ class Device(Base):
     scan_count = Column(Integer, default=1, nullable=False)
 
 
+class Setting(Base):
+    __tablename__ = "settings"
+
+    key = Column(String(50), primary_key=True)
+    value = Column(String(255), nullable=False)
+
+
 class ScanRun(Base):
     __tablename__ = "scan_runs"
 

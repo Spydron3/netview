@@ -17,6 +17,11 @@
     </div>
     <div class="header-right">
       <span id="network-badge" class="badge">detecting…</span>
+      <button class="btn btn-icon" onclick="openSettings()" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
       <button id="scan-btn" class="btn" onclick="triggerScan()">Scan Now</button>
     </div>
   </div>
@@ -78,6 +83,46 @@
   </details>
 
 </main>
+
+<div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-backdrop" onclick="closeSettings()"></div>
+  <div class="modal-panel">
+    <div class="modal-header">
+      <h2>Settings</h2>
+      <button class="modal-close" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <div class="setting-row">
+        <label for="s-interval">Scan interval</label>
+        <div class="input-with-unit">
+          <input id="s-interval" type="number" min="1" max="1440" step="1" />
+          <span>minutes</span>
+        </div>
+        <p class="setting-hint">How often to automatically scan the network. Minimum 1 minute.</p>
+      </div>
+
+      <div class="setting-row">
+        <label for="s-network">Network range</label>
+        <input id="s-network" type="text" placeholder="auto-detect" />
+        <p class="setting-hint">CIDR notation, e.g. <code>192.168.1.0/24</code>. Leave empty to auto-detect.</p>
+      </div>
+
+      <div class="setting-row">
+        <label class="toggle-row">
+          <input id="s-port-scan" type="checkbox" />
+          <span>Enable port scanning</span>
+        </label>
+        <p class="setting-hint">Scan the top 100 ports on each live host. Disabling makes scans faster.</p>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <span id="settings-msg" class="settings-msg"></span>
+      <button class="btn" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
 
 <script src="/static/app.js"></script>
 </body>

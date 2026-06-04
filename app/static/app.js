@@ -10,6 +10,58 @@ let pollTimer = null;
   startAutoRefresh();
 })();
 
+// ── settings ──────────────────────────────────────────────────────────────────
+
+async function openSettings() {
+  try {
+    const s = await apiFetch('/api/settings');
+    el('s-interval').value    = Math.round(parseInt(s.scan_interval || '300') / 60);
+    el('s-network').value     = s.network_range || '';
+    el('s-port-scan').checked = (s.port_scan_enabled || 'true') === 'true';
+    el('settings-msg').textContent = '';
+  } catch (e) {
+    console.error('loadSettings:', e);
+  }
+  el('settings-modal').classList.remove('hidden');
+}
+
+function closeSettings() {
+  el('settings-modal').classList.add('hidden');
+}
+
+async function saveSettings() {
+  const minutes = parseInt(el('s-interval').value);
+  if (!minutes || minutes < 1) {
+    showSettingsMsg('Interval must be at least 1 minute.', true);
+    return;
+  }
+  try {
+    await apiFetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scan_interval:      minutes * 60,
+        port_scan_enabled:  el('s-port-scan').checked,
+        network_range:      el('s-network').value.trim(),
+      }),
+    });
+    showSettingsMsg('Saved.');
+    setTimeout(closeSettings, 800);
+  } catch (e) {
+    showSettingsMsg('Failed to save.', true);
+  }
+}
+
+function showSettingsMsg(text, error = false) {
+  const msg = el('settings-msg');
+  msg.textContent = text;
+  msg.style.color = error ? 'var(--red)' : 'var(--green)';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeSettings();
+});
+
 // ── data loading ──────────────────────────────────────────────────────────────
 
 async function loadStats() {

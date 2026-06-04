@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from models import Base
+from models import Base, Setting
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,17 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                 conn.execute(text(
                     "ALTER TABLE devices ADD COLUMN IF NOT EXISTS name VARCHAR(255)"
                 ))
+                # seed default settings from env vars on first run
+                defaults = {
+                    "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),
+                    "port_scan_enabled": os.environ.get("PORT_SCAN_ENABLED", "true"),
+                    "network_range": os.environ.get("NETWORK_RANGE", ""),
+                }
+                for key, value in defaults.items():
+                    conn.execute(text(
+                        "INSERT INTO settings (key, value) VALUES (:k, :v) "
+                        "ON CONFLICT (key) DO NOTHING"
+                    ), {"k": key, "v": value})
                 conn.commit()
             logger.info("Database ready")
             return
@@ -46,6 +57,24 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
             logger.warning("DB not ready (attempt %d/%d): %s", attempt, retries, exc)
             time.sleep(delay)
     raise RuntimeError("Could not connect to the database after %d attempts" % retries)
+
+
+def get_setting(key: str, default: str = "") -> str:
+    try:
+        with get_db() as db:
+            row = db.get(Setting, key)
+            return row.value if row else default
+    except Exception:
+        return default
+
+
+def set_setting(key: str, value: str) -> None:
+    with get_db() as db:
+        row = db.get(Setting, key)
+        if row:
+            row.value = value
+        else:
+            db.add(Setting(key=key, value=value))
 
 
 @contextmanager
