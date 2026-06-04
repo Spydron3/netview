@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -12,15 +13,18 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from database import get_db, get_setting, init_db, set_setting
-from models import Device, ScanRun, Setting
+from models import Device, ScanRun, Setting, Switch, TopologyLink
 from scanner import get_network_range, scan_network
+from snmp_scanner import poll_switch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-_scan_lock = threading.Lock()
+_scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
-_scheduler = BackgroundScheduler(daemon=True)
+_topo_lock  = threading.Lock()
+_topo_state: dict = {"running": False, "started_at": None}
+_scheduler  = BackgroundScheduler(daemon=True)
 
 
 def _run_scan() -> None:
@@ -113,6 +117,65 @@ def _run_scan() -> None:
     finally:
         _scan_state["running"] = False
         _scan_lock.release()
+
+
+def _run_topo_scan() -> None:
+    if not _topo_lock.acquire(blocking=False):
+        logger.info("Topology scan already running — skipping")
+        return
+
+    _topo_state["running"] = True
+    _topo_state["started_at"] = datetime.utcnow()
+
+    try:
+        with get_db() as db:
+            switches = db.execute(
+                sa.select(Switch).where(Switch.enabled.is_(True))
+            ).scalars().all()
+
+        for sw in switches:
+            logger.info("Polling switch %s (%s)", sw.ip_address, sw.name or "unnamed")
+            try:
+                data = poll_switch(sw.ip_address, sw.community)
+            except Exception as exc:
+                logger.error("poll_switch failed for %s: %s", sw.ip_address, exc)
+                data = {"error": str(exc), "mac_table": [], "lldp_neighbors": []}
+
+            with get_db() as db:
+                switch = db.get(Switch, sw.id)
+                switch.last_polled = datetime.utcnow()
+                switch.status = "error" if data.get("error") else "ok"
+
+                if not data.get("error"):
+                    # Replace links for this switch
+                    db.execute(sa.delete(TopologyLink).where(TopologyLink.switch_id == sw.id))
+
+                    for entry in data.get("mac_table", []):
+                        db.add(TopologyLink(
+                            switch_id=sw.id,
+                            local_port=entry["port_name"],
+                            local_port_index=entry["port_index"],
+                            remote_mac=entry["mac"],
+                            link_type="device",
+                            last_seen=datetime.utcnow(),
+                        ))
+
+                    for nb in data.get("lldp_neighbors", []):
+                        db.add(TopologyLink(
+                            switch_id=sw.id,
+                            local_port=nb["local_port"],
+                            local_port_index=nb["local_port_index"],
+                            remote_mac=nb["remote_mac"],
+                            remote_sysname=nb["remote_sysname"],
+                            link_type="lldp",
+                            last_seen=datetime.utcnow(),
+                        ))
+
+    except Exception as exc:
+        logger.exception("Topology scan failed: %s", exc)
+    finally:
+        _topo_state["running"] = False
+        _topo_lock.release()
 
 
 @asynccontextmanager
@@ -258,7 +321,195 @@ def api_scan_history():
         return [_scan_to_dict(r) for r in rows]
 
 
+# ── switches ─────────────────────────────────────────────────────────────────
+
+class SwitchCreate(BaseModel):
+    ip_address: str
+    name: str | None = None
+    community: str = "public"
+
+
+@app.get("/api/switches")
+def api_list_switches():
+    with get_db() as db:
+        rows = db.execute(sa.select(Switch).order_by(Switch.ip_address)).scalars().all()
+        return [_switch_to_dict(s) for s in rows]
+
+
+@app.post("/api/switches", status_code=201)
+def api_add_switch(body: SwitchCreate):
+    with get_db() as db:
+        existing = db.execute(
+            sa.select(Switch).where(Switch.ip_address == body.ip_address)
+        ).scalar_one_or_none()
+        if existing:
+            raise HTTPException(status_code=409, detail="Switch already exists")
+        sw = Switch(
+            ip_address=body.ip_address,
+            name=body.name,
+            community=body.community or "public",
+        )
+        db.add(sw)
+        db.flush()
+        return _switch_to_dict(sw)
+
+
+@app.delete("/api/switches/{switch_id}", status_code=204)
+def api_delete_switch(switch_id: int):
+    with get_db() as db:
+        sw = db.get(Switch, switch_id)
+        if not sw:
+            raise HTTPException(status_code=404, detail="Switch not found")
+        db.execute(sa.delete(TopologyLink).where(TopologyLink.switch_id == switch_id))
+        db.delete(sw)
+
+
+@app.patch("/api/switches/{switch_id}")
+def api_update_switch(switch_id: int, body: SwitchCreate):
+    with get_db() as db:
+        sw = db.get(Switch, switch_id)
+        if not sw:
+            raise HTTPException(status_code=404, detail="Switch not found")
+        sw.ip_address = body.ip_address
+        sw.name = body.name
+        sw.community = body.community or "public"
+        return _switch_to_dict(sw)
+
+
+# ── topology ──────────────────────────────────────────────────────────────────
+
+@app.post("/api/topology/scan")
+def api_topo_scan(background_tasks: BackgroundTasks):
+    if _topo_state["running"]:
+        return {"status": "already_running", "started_at": _topo_state["started_at"]}
+    background_tasks.add_task(_run_topo_scan)
+    return {"status": "started"}
+
+
+@app.get("/api/topology/status")
+def api_topo_status():
+    return {
+        "running": _topo_state["running"],
+        "started_at": _topo_state["started_at"],
+    }
+
+
+@app.get("/api/topology")
+def api_topology():
+    with get_db() as db:
+        switches = db.execute(sa.select(Switch)).scalars().all()
+        links    = db.execute(sa.select(TopologyLink)).scalars().all()
+        devices  = db.execute(sa.select(Device)).scalars().all()
+
+    # MAC → device lookup
+    mac_to_dev = {
+        d.mac_address.lower(): d
+        for d in devices
+        if d.mac_address
+    }
+
+    # switch id → switch
+    sw_map = {sw.id: sw for sw in switches}
+
+    nodes: list[dict] = []
+    edges: list[dict] = []
+    seen_nodes: set[str] = set()
+
+    def _add_node(nid: str, node: dict):
+        if nid not in seen_nodes:
+            nodes.append({"id": nid, **node})
+            seen_nodes.add(nid)
+
+    # Switch nodes
+    for sw in switches:
+        _add_node(f"sw_{sw.id}", {
+            "type": "switch",
+            "label": sw.name or sw.ip_address,
+            "ip": sw.ip_address,
+            "name": sw.name,
+            "status": sw.status,
+            "last_polled": sw.last_polled.isoformat() if sw.last_polled else None,
+        })
+
+    # Build edges from topology links
+    for link in links:
+        src = f"sw_{link.switch_id}"
+        if src not in seen_nodes:
+            continue  # orphaned link
+
+        if link.link_type == "lldp":
+            # Find target switch by sysname or MAC
+            target_sw = None
+            if link.remote_sysname:
+                for sw in switches:
+                    if sw.ip_address == link.remote_sysname or (
+                        sw.name and sw.name.lower() == link.remote_sysname.lower()
+                    ):
+                        target_sw = sw
+                        break
+            if target_sw:
+                tgt = f"sw_{target_sw.id}"
+            else:
+                # Unknown neighbour switch — add as a ghost node
+                nid_raw = link.remote_mac or link.remote_sysname or str(link.id)
+                tgt = "ext_" + re.sub(r"[^a-z0-9]", "_", nid_raw.lower())
+                _add_node(tgt, {
+                    "type": "external_switch",
+                    "label": link.remote_sysname or link.remote_mac or "Unknown switch",
+                    "mac": link.remote_mac,
+                    "sysname": link.remote_sysname,
+                })
+            edges.append({
+                "source": src, "target": tgt,
+                "port": link.local_port, "type": "lldp",
+            })
+
+        else:  # device link from MAC table
+            if not link.remote_mac:
+                continue
+            dev = mac_to_dev.get(link.remote_mac.lower())
+            if dev:
+                tgt = f"dev_{dev.id}"
+                _add_node(tgt, {
+                    "type": "device",
+                    "label": dev.name or dev.hostname or dev.ip_address,
+                    "ip": dev.ip_address,
+                    "mac": dev.mac_address,
+                    "hostname": dev.hostname,
+                    "vendor": dev.vendor,
+                    "name": dev.name,
+                    "is_online": dev.is_online,
+                })
+            else:
+                # MAC seen on switch but not yet in devices table
+                tgt = "mac_" + link.remote_mac.replace(":", "")
+                _add_node(tgt, {
+                    "type": "unknown_device",
+                    "label": link.remote_mac,
+                    "mac": link.remote_mac,
+                    "is_online": None,
+                })
+            edges.append({
+                "source": src, "target": tgt,
+                "port": link.local_port, "type": "device",
+            })
+
+    return {"nodes": nodes, "edges": edges}
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+def _switch_to_dict(s: Switch) -> dict:
+    return {
+        "id": s.id,
+        "ip_address": s.ip_address,
+        "name": s.name,
+        "community": s.community,
+        "enabled": s.enabled,
+        "status": s.status,
+        "last_polled": s.last_polled.isoformat() if s.last_polled else None,
+    }
+
 
 def _device_to_dict(d: Device) -> dict:
     return {

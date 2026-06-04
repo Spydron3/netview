@@ -29,6 +29,7 @@
 
 <main>
 
+  <!-- stats always visible -->
   <div class="stats-row">
     <div class="stat-card">
       <div class="stat-value" id="stat-total">—</div>
@@ -53,37 +54,104 @@
     Scanning network…
   </div>
 
-  <div class="toolbar">
-    <input id="search" type="search" placeholder="Search by IP, hostname, MAC, vendor…" oninput="applyFilter()" />
-    <label class="toggle-label">
-      <input id="show-offline" type="checkbox" onchange="applyFilter()" />
-      Show offline
-    </label>
+  <!-- tab bar -->
+  <div class="tab-bar">
+    <button class="tab active" data-tab="devices" onclick="switchTab('devices')">Devices</button>
+    <button class="tab" data-tab="topology" onclick="switchTab('topology')">Topology</button>
   </div>
 
-  <div id="device-grid" class="device-grid">
-    <p class="empty">Loading…</p>
+  <!-- ── devices tab ── -->
+  <div id="tab-devices" class="tab-content">
+
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Search by IP, hostname, MAC, vendor…" oninput="applyFilter()" />
+      <label class="toggle-label">
+        <input id="show-offline" type="checkbox" onchange="applyFilter()" />
+        Show offline
+      </label>
+    </div>
+
+    <div id="device-grid" class="device-grid">
+      <p class="empty">Loading…</p>
+    </div>
+
+    <details class="history-panel">
+      <summary>Scan History</summary>
+      <table id="history-table">
+        <thead>
+          <tr>
+            <th>Time</th><th>Network</th><th>Found</th>
+            <th>Online</th><th>Duration</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </details>
+
   </div>
 
-  <details class="history-panel">
-    <summary>Scan History</summary>
-    <table id="history-table">
-      <thead>
-        <tr>
-          <th>Time</th>
-          <th>Network</th>
-          <th>Found</th>
-          <th>Online</th>
-          <th>Duration</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="history-body"></tbody>
-    </table>
-  </details>
+  <!-- ── topology tab ── -->
+  <div id="tab-topology" class="tab-content hidden">
+
+    <div class="topo-toolbar">
+      <button id="topo-scan-btn" class="btn" onclick="triggerTopoScan()">Scan Topology</button>
+      <div id="topo-banner" class="scan-banner hidden" style="flex:1">
+        <div class="scan-pulse"></div> Polling switches via SNMP…
+      </div>
+    </div>
+
+    <div class="topo-layout">
+
+      <!-- graph area -->
+      <div class="topo-graph-wrap" id="topo-graph-wrap">
+        <div id="topo-empty" class="topo-empty hidden">
+          <p>No switches configured yet.</p>
+          <p>Add a managed switch below to build the topology map.</p>
+        </div>
+        <svg id="topo-svg"></svg>
+
+        <!-- node detail side-panel -->
+        <div id="node-detail" class="node-detail hidden">
+          <button class="node-detail-close" onclick="closeNodeDetail()">✕</button>
+          <div id="node-detail-body"></div>
+        </div>
+
+        <!-- legend -->
+        <div class="topo-legend">
+          <span class="legend-item"><span class="legend-dot switch"></span>Switch</span>
+          <span class="legend-item"><span class="legend-dot online"></span>Online</span>
+          <span class="legend-item"><span class="legend-dot offline"></span>Offline</span>
+          <span class="legend-item"><span class="legend-dot unknown"></span>Unknown</span>
+        </div>
+      </div>
+
+      <!-- switch management panel -->
+      <div class="switches-panel">
+        <div class="switches-panel-header">
+          <h3>Managed Switches</h3>
+          <button class="btn btn-sm" onclick="showAddSwitchForm()">+ Add</button>
+        </div>
+
+        <div id="add-switch-form" class="add-switch-form hidden">
+          <input id="sw-ip"        type="text" placeholder="IP address *" />
+          <input id="sw-name"      type="text" placeholder="Name (optional)" />
+          <input id="sw-community" type="text" placeholder="SNMP community (default: public)" />
+          <div class="form-row">
+            <button class="btn btn-sm" onclick="addSwitch()">Save</button>
+            <button class="btn btn-sm btn-ghost" onclick="hideAddSwitchForm()">Cancel</button>
+          </div>
+          <p id="sw-form-error" class="form-error"></p>
+        </div>
+
+        <div id="switches-list"></div>
+      </div>
+
+    </div>
+  </div>
 
 </main>
 
+<!-- settings modal -->
 <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true">
   <div class="modal-backdrop" onclick="closeSettings()"></div>
   <div class="modal-panel">
@@ -124,6 +192,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

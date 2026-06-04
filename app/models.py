@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, JSON, String
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -28,6 +28,31 @@ class Setting(Base):
 
     key = Column(String(50), primary_key=True)
     value = Column(String(255), nullable=False)
+
+
+class Switch(Base):
+    __tablename__ = "switches"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ip_address = Column(String(45), unique=True, nullable=False)
+    name = Column(String(255), nullable=True)
+    community = Column(String(255), default="public", nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    last_polled = Column(DateTime, nullable=True)
+    status = Column(String(20), default="unknown", nullable=False)  # ok | error | timeout | unknown
+
+
+class TopologyLink(Base):
+    __tablename__ = "topology_links"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    switch_id = Column(Integer, ForeignKey("switches.id", ondelete="CASCADE"), nullable=False)
+    local_port = Column(String(100), nullable=True)    # human-readable port name
+    local_port_index = Column(Integer, nullable=True)
+    remote_mac = Column(String(17), nullable=True)     # device or remote switch MAC
+    remote_sysname = Column(String(255), nullable=True) # LLDP neighbour system name
+    link_type = Column(String(10), default="device", nullable=False)  # device | lldp
+    last_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class ScanRun(Base):

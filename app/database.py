@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+import models  # noqa: F401 – all subclasses must be imported before create_all
 from models import Base, Setting
 
 logger = logging.getLogger(__name__)
