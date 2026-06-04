@@ -17,9 +17,9 @@ _FDB_STATUS       = "1.3.6.1.2.1.17.4.3.1.3"  # dot1dTpFdbStatus   – 3=learned
 _BRIDGE_PORT_IFIDX= "1.3.6.1.2.1.17.1.4.1.2"  # dot1dBasePortIfIndex – bridge-port → ifIndex
 _IF_NAME          = "1.3.6.1.2.1.31.1.1.1.1"  # ifName
 _IF_DESCR         = "1.3.6.1.2.1.2.2.1.2"     # ifDescr (fallback)
-_LLDP_REM_SYSNAME = "1.0.8802.1.1.2.1.4.1.1.7"  # lldpRemSysName
-_LLDP_REM_CHASSIS = "1.0.8802.1.1.2.1.4.1.1.6"  # lldpRemChassisId (often MAC)
-_LLDP_REM_PORT    = "1.0.8802.1.1.2.1.4.1.1.5"  # lldpRemPortDesc
+_LLDP_REM_CHASSIS = "1.0.8802.1.1.2.1.4.1.1.5"  # lldpRemChassisId (often MAC)
+_LLDP_REM_PORT    = "1.0.8802.1.1.2.1.4.1.1.8"  # lldpRemPortDesc
+_LLDP_REM_SYSNAME = "1.0.8802.1.1.2.1.4.1.1.9"  # lldpRemSysName
 
 
 # ── low-level walk ────────────────────────────────────────────────────────────
