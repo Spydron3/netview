@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Netview</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <div class="brand">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="12" r="4"/>
+        <line x1="21.17" y1="8" x2="12" y2="8"/>
+        <line x1="3.95" y1="6.06" x2="8.54" y2="14"/>
+        <line x1="10.88" y1="21.94" x2="15.46" y2="14"/>
+      </svg>
+      <span>Netview</span>
+    </div>
+    <div class="header-right">
+      <span id="network-badge" class="badge">detecting…</span>
+      <button id="scan-btn" class="btn" onclick="triggerScan()">Scan Now</button>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-value" id="stat-total">—</div>
+      <div class="stat-label">Total Devices</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value green" id="stat-online">—</div>
+      <div class="stat-label">Online</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value muted" id="stat-offline">—</div>
+      <div class="stat-label">Offline</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-last-scan">—</div>
+      <div class="stat-label">Last Scan</div>
+    </div>
+  </div>
+
+  <div id="scan-banner" class="scan-banner hidden">
+    <div class="scan-pulse"></div>
+    Scanning network…
+  </div>
+
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Search by IP, hostname, MAC, vendor…" oninput="applyFilter()" />
+    <label class="toggle-label">
+      <input id="show-offline" type="checkbox" onchange="applyFilter()" />
+      Show offline
+    </label>
+  </div>
+
+  <div id="device-grid" class="device-grid">
+    <p class="empty">Loading…</p>
+  </div>
+
+  <details class="history-panel">
+    <summary>Scan History</summary>
+    <table id="history-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Network</th>
+          <th>Found</th>
+          <th>Online</th>
+          <th>Duration</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="history-body"></tbody>
+    </table>
+  </details>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

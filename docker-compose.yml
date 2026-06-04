@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  app:
+    image: ghcr.io/spydron3/netview:latest
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      DATABASE_URL: postgresql://netview:netview@localhost:5432/netview
+      SCAN_INTERVAL: "300"        # seconds between automatic scans
+      NETWORK_RANGE: ""           # leave empty for auto-detect; set e.g. 192.168.1.0/24
+      PORT_SCAN_ENABLED: "true"   # set false for faster host-only scans
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "127.0.0.1:5432:5432"    # expose only on loopback so app (on host network) can reach it
+    environment:
+      POSTGRES_DB: netview
+      POSTGRES_USER: netview
+      POSTGRES_PASSWORD: netview
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netview -d netview"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  pgdata:
