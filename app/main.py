@@ -189,7 +189,7 @@ def _run_topo_scan() -> None:
                             switch_id=sw["id"],
                             local_port=entry["port_name"],
                             local_port_index=entry["port_index"],
-                            remote_mac=entry["mac"],
+                            remote_mac=entry["mac"].lower() if entry.get("mac") else None,
                             link_type="device",
                             last_seen=datetime.utcnow(),
                         ))
@@ -199,7 +199,7 @@ def _run_topo_scan() -> None:
                             switch_id=sw["id"],
                             local_port=nb["local_port"],
                             local_port_index=nb["local_port_index"],
-                            remote_mac=nb["remote_mac"],
+                            remote_mac=nb["remote_mac"].lower() if nb.get("remote_mac") else None,
                             remote_sysname=nb["remote_sysname"],
                             link_type="lldp",
                             last_seen=datetime.utcnow(),
@@ -573,7 +573,7 @@ def api_topology():
                     })
                 else:
                     # MAC seen on switch but not yet in devices table
-                    tgt = "mac_" + link.remote_mac.replace(":", "")
+                    tgt = "mac_" + link.remote_mac.lower().replace(":", "")
                     _add_node(tgt, {
                         "type": "unknown_device",
                         "label": link.remote_mac,

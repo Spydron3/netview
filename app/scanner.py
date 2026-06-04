@@ -52,7 +52,8 @@ def _parse_host(nm: nmap.PortScanner, host: str) -> dict:
     }
 
     addrs = nm[host].get("addresses", {})
-    device["mac_address"] = addrs.get("mac") or None
+    mac = addrs.get("mac")
+    device["mac_address"] = mac.lower() if mac else None
 
     vendor_map = nm[host].get("vendor", {})
     if vendor_map:
@@ -144,7 +145,7 @@ def scan_network(
                     if not devices_by_ip[host]["mac_address"]:
                         mac = nm2[host].get("addresses", {}).get("mac")
                         if mac:
-                            devices_by_ip[host]["mac_address"] = mac
+                            devices_by_ip[host]["mac_address"] = mac.lower()
                     if not devices_by_ip[host]["vendor"]:
                         vmap = nm2[host].get("vendor", {})
                         if vmap:
