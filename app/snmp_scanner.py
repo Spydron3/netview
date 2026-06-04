@@ -24,7 +24,7 @@ _LLDP_REM_PORT    = "1.0.8802.1.1.2.1.4.1.1.5"  # lldpRemPortDesc
 
 # ── low-level walk ────────────────────────────────────────────────────────────
 
-def _walk(host: str, community: str, oid: str, timeout: int = 5) -> dict[str, str]:
+def _walk(host: str, community: str, oid: str, timeout: int = 15) -> dict[str, str]:
     """Return {full_oid: raw_value_string} from snmpwalk."""
     try:
         proc = subprocess.run(
