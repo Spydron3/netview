@@ -129,26 +129,30 @@ def _run_topo_scan() -> None:
 
     try:
         with get_db() as db:
-            switches = db.execute(
+            switch_rows = db.execute(
                 sa.select(Switch).where(Switch.enabled.is_(True))
             ).scalars().all()
+            switches = [
+                {"id": sw.id, "ip_address": sw.ip_address, "name": sw.name, "community": sw.community}
+                for sw in switch_rows
+            ]
 
         for sw in switches:
-            logger.info("Polling switch %s (%s)", sw.ip_address, sw.name or "unnamed")
+            logger.info("Polling switch %s (%s)", sw["ip_address"], sw["name"] or "unnamed")
             try:
-                data = poll_switch(sw.ip_address, sw.community)
+                data = poll_switch(sw["ip_address"], sw["community"])
             except Exception as exc:
-                logger.error("poll_switch failed for %s: %s", sw.ip_address, exc)
+                logger.error("poll_switch failed for %s: %s", sw["ip_address"], exc)
                 data = {"error": str(exc), "mac_table": [], "lldp_neighbors": []}
 
             with get_db() as db:
-                switch = db.get(Switch, sw.id)
+                switch = db.get(Switch, sw["id"])
                 switch.last_polled = datetime.utcnow()
                 switch.status = "error" if data.get("error") else "ok"
 
                 if not data.get("error"):
                     # Replace links for this switch
-                    db.execute(sa.delete(TopologyLink).where(TopologyLink.switch_id == sw.id))
+                    db.execute(sa.delete(TopologyLink).where(TopologyLink.switch_id == sw["id"]))
 
                     for entry in data.get("mac_table", []):
                         db.add(TopologyLink(
@@ -401,98 +405,95 @@ def api_topology():
         links    = db.execute(sa.select(TopologyLink)).scalars().all()
         devices  = db.execute(sa.select(Device)).scalars().all()
 
-    # MAC → device lookup
-    mac_to_dev = {
-        d.mac_address.lower(): d
-        for d in devices
-        if d.mac_address
-    }
+        # MAC → device lookup (inside session so attributes are accessible)
+        mac_to_dev = {
+            d.mac_address.lower(): d
+            for d in devices
+            if d.mac_address
+        }
 
-    # switch id → switch
-    sw_map = {sw.id: sw for sw in switches}
+        nodes: list[dict] = []
+        edges: list[dict] = []
+        seen_nodes: set[str] = set()
 
-    nodes: list[dict] = []
-    edges: list[dict] = []
-    seen_nodes: set[str] = set()
+        def _add_node(nid: str, node: dict):
+            if nid not in seen_nodes:
+                nodes.append({"id": nid, **node})
+                seen_nodes.add(nid)
 
-    def _add_node(nid: str, node: dict):
-        if nid not in seen_nodes:
-            nodes.append({"id": nid, **node})
-            seen_nodes.add(nid)
-
-    # Switch nodes
-    for sw in switches:
-        _add_node(f"sw_{sw.id}", {
-            "type": "switch",
-            "label": sw.name or sw.ip_address,
-            "ip": sw.ip_address,
-            "name": sw.name,
-            "status": sw.status,
-            "last_polled": sw.last_polled.isoformat() if sw.last_polled else None,
-        })
-
-    # Build edges from topology links
-    for link in links:
-        src = f"sw_{link.switch_id}"
-        if src not in seen_nodes:
-            continue  # orphaned link
-
-        if link.link_type == "lldp":
-            # Find target switch by sysname or MAC
-            target_sw = None
-            if link.remote_sysname:
-                for sw in switches:
-                    if sw.ip_address == link.remote_sysname or (
-                        sw.name and sw.name.lower() == link.remote_sysname.lower()
-                    ):
-                        target_sw = sw
-                        break
-            if target_sw:
-                tgt = f"sw_{target_sw.id}"
-            else:
-                # Unknown neighbour switch — add as a ghost node
-                nid_raw = link.remote_mac or link.remote_sysname or str(link.id)
-                tgt = "ext_" + re.sub(r"[^a-z0-9]", "_", nid_raw.lower())
-                _add_node(tgt, {
-                    "type": "external_switch",
-                    "label": link.remote_sysname or link.remote_mac or "Unknown switch",
-                    "mac": link.remote_mac,
-                    "sysname": link.remote_sysname,
-                })
-            edges.append({
-                "source": src, "target": tgt,
-                "port": link.local_port, "type": "lldp",
+        # Switch nodes
+        for sw in switches:
+            _add_node(f"sw_{sw.id}", {
+                "type": "switch",
+                "label": sw.name or sw.ip_address,
+                "ip": sw.ip_address,
+                "name": sw.name,
+                "status": sw.status,
+                "last_polled": sw.last_polled.isoformat() if sw.last_polled else None,
             })
 
-        else:  # device link from MAC table
-            if not link.remote_mac:
-                continue
-            dev = mac_to_dev.get(link.remote_mac.lower())
-            if dev:
-                tgt = f"dev_{dev.id}"
-                _add_node(tgt, {
-                    "type": "device",
-                    "label": dev.name or dev.hostname or dev.ip_address,
-                    "ip": dev.ip_address,
-                    "mac": dev.mac_address,
-                    "hostname": dev.hostname,
-                    "vendor": dev.vendor,
-                    "name": dev.name,
-                    "is_online": dev.is_online,
+        # Build edges from topology links
+        for link in links:
+            src = f"sw_{link.switch_id}"
+            if src not in seen_nodes:
+                continue  # orphaned link
+
+            if link.link_type == "lldp":
+                # Find target switch by sysname or MAC
+                target_sw = None
+                if link.remote_sysname:
+                    for sw in switches:
+                        if sw.ip_address == link.remote_sysname or (
+                            sw.name and sw.name.lower() == link.remote_sysname.lower()
+                        ):
+                            target_sw = sw
+                            break
+                if target_sw:
+                    tgt = f"sw_{target_sw.id}"
+                else:
+                    # Unknown neighbour switch — add as a ghost node
+                    nid_raw = link.remote_mac or link.remote_sysname or str(link.id)
+                    tgt = "ext_" + re.sub(r"[^a-z0-9]", "_", nid_raw.lower())
+                    _add_node(tgt, {
+                        "type": "external_switch",
+                        "label": link.remote_sysname or link.remote_mac or "Unknown switch",
+                        "mac": link.remote_mac,
+                        "sysname": link.remote_sysname,
+                    })
+                edges.append({
+                    "source": src, "target": tgt,
+                    "port": link.local_port, "type": "lldp",
                 })
-            else:
-                # MAC seen on switch but not yet in devices table
-                tgt = "mac_" + link.remote_mac.replace(":", "")
-                _add_node(tgt, {
-                    "type": "unknown_device",
-                    "label": link.remote_mac,
-                    "mac": link.remote_mac,
-                    "is_online": None,
+
+            else:  # device link from MAC table
+                if not link.remote_mac:
+                    continue
+                dev = mac_to_dev.get(link.remote_mac.lower())
+                if dev:
+                    tgt = f"dev_{dev.id}"
+                    _add_node(tgt, {
+                        "type": "device",
+                        "label": dev.name or dev.hostname or dev.ip_address,
+                        "ip": dev.ip_address,
+                        "mac": dev.mac_address,
+                        "hostname": dev.hostname,
+                        "vendor": dev.vendor,
+                        "name": dev.name,
+                        "is_online": dev.is_online,
+                    })
+                else:
+                    # MAC seen on switch but not yet in devices table
+                    tgt = "mac_" + link.remote_mac.replace(":", "")
+                    _add_node(tgt, {
+                        "type": "unknown_device",
+                        "label": link.remote_mac,
+                        "mac": link.remote_mac,
+                        "is_online": None,
+                    })
+                edges.append({
+                    "source": src, "target": tgt,
+                    "port": link.local_port, "type": "device",
                 })
-            edges.append({
-                "source": src, "target": tgt,
-                "port": link.local_port, "type": "device",
-            })
 
     return {"nodes": nodes, "edges": edges}
 
