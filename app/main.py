@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -154,11 +155,25 @@ def _run_topo_scan() -> None:
         # Passive LLDP capture runs in parallel with SNMP polling.
         # Listens for 30 s so every device gets a chance to advertise.
         _lldp_results: list[dict] = []
+        _lldp_duration = 30
+
         def _lldp_worker():
-            _lldp_results.extend(listen_lldp(duration=30))
+            listen_lldp(duration=_lldp_duration, out=_lldp_results)
+
         lldp_thread = threading.Thread(target=_lldp_worker, daemon=True, name="lldp-capture")
         lldp_thread.start()
+        _lldp_start = time.monotonic()
         _tlog("Passive LLDP capture started (30 s)…")
+
+        def _lldp_progress():
+            while lldp_thread.is_alive():
+                time.sleep(5)
+                if not lldp_thread.is_alive():
+                    break
+                elapsed = int(time.monotonic() - _lldp_start)
+                _tlog(f"  LLDP: {elapsed}s / {_lldp_duration}s — {len(_lldp_results)} device(s) seen")
+
+        threading.Thread(target=_lldp_progress, daemon=True, name="lldp-progress").start()
 
         for sw in switches:
             label = sw["name"] or sw["ip_address"]

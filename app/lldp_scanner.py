@@ -42,11 +42,16 @@ def _parse_tlvs(payload: bytes) -> dict:
     return result
 
 
-def listen_lldp(duration: float = 60.0, stop_event: threading.Event | None = None) -> list[dict]:
+def listen_lldp(
+    duration: float = 60.0,
+    stop_event: threading.Event | None = None,
+    out: list | None = None,
+) -> list[dict]:
     """
     Capture LLDP frames for up to `duration` seconds (or until stop_event is set).
     Returns list of dicts: {src_mac, chassis_mac, system_name, system_desc, mgmt_ip}.
     Returns [] silently if CAP_NET_RAW is not available.
+    If `out` is provided, new entries are appended to it as they are discovered.
     """
     try:
         sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(ETH_P_LLDP))
@@ -80,6 +85,8 @@ def listen_lldp(duration: float = 60.0, stop_event: threading.Event | None = Non
                 logger.info("LLDP: %s mac=%s ip=%s",
                             parsed.get("system_name") or src_mac,
                             src_mac, parsed.get("mgmt_ip"))
+                if out is not None:
+                    out.append(parsed)
             discovered[src_mac] = parsed
     finally:
         sock.close()
