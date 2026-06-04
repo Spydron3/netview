@@ -540,9 +540,9 @@ tr:hover td { background: var(--surface2); }
 .topo-node:hover circle { filter: brightness(1.3); }
 
 /* D3 edges */
-.topo-edge         { stroke: var(--border); stroke-width: 1.5; }
-.topo-edge-lldp    { stroke: var(--blue); stroke-width: 2.5; stroke-dasharray: 6 3; }
-.topo-edge-device  { stroke: var(--muted); stroke-width: 1.2; }
+.topo-edge         { fill: none; stroke: var(--border); stroke-width: 1.5; }
+.topo-edge-lldp    { fill: none; stroke: var(--blue); stroke-width: 2.5; stroke-dasharray: 6 3; }
+.topo-edge-device  { fill: none; stroke: var(--muted); stroke-width: 1.2; }
 
 /* legend */
 .topo-legend {

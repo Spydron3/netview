@@ -499,6 +499,19 @@ function renderTopology(data) {
   const nodes = data.nodes.map(n => ({ ...n }));
   const edges = data.edges.map(e => ({ ...e }));
 
+  // assign curve offsets to parallel edges so they don't overlap
+  const _pairCount = {}, _pairIdx = {};
+  edges.forEach(e => {
+    const k = [e.source, e.target].sort().join('|');
+    _pairCount[k] = (_pairCount[k] || 0) + 1;
+  });
+  edges.forEach(e => {
+    const k = [e.source, e.target].sort().join('|');
+    const idx = (_pairIdx[k] = (_pairIdx[k] || 0) + 1);
+    const total = _pairCount[k];
+    e.curveOffset = total === 1 ? 0 : (idx - (total + 1) / 2) * 44;
+  });
+
   // ── simulation ──
   if (topoSimulation) topoSimulation.stop();
   topoSimulation = d3.forceSimulation(nodes)
@@ -509,7 +522,7 @@ function renderTopology(data) {
 
   // ── edges ──
   const edgeG = g.append('g').attr('class', 'topo-edges');
-  const edge = edgeG.selectAll('line').data(edges).join('line')
+  const edge = edgeG.selectAll('path').data(edges).join('path')
     .attr('class', d => `topo-edge topo-edge-${d.type}`)
     .on('mouseenter', (ev, d) => showEdgeTip(ev, d))
     .on('mouseleave', hideEdgeTip);
@@ -539,8 +552,15 @@ function renderTopology(data) {
 
   // tick
   topoSimulation.on('tick', () => {
-    edge.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    edge.attr('d', d => {
+      const sx = d.source.x, sy = d.source.y;
+      const tx = d.target.x, ty = d.target.y;
+      if (!d.curveOffset) return `M${sx},${sy}L${tx},${ty}`;
+      const dx = tx - sx, dy = ty - sy;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const mx = (sx + tx) / 2, my = (sy + ty) / 2;
+      return `M${sx},${sy}Q${mx + d.curveOffset * (-dy / len)},${my + d.curveOffset * (dx / len)},${tx},${ty}`;
+    });
     node.attr('transform', d => `translate(${d.x},${d.y})`);
   });
 
