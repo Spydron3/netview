@@ -92,6 +92,9 @@ def _oid_suffix(full_oid: str, base_oid: str) -> str:
 
 # ── main poll function ────────────────────────────────────────────────────────
 
+_SYS_DESCR = "1.3.6.1.2.1.1.1.0"  # sysDescr – present on any SNMP-capable device
+
+
 def poll_switch(host: str, community: str = "public") -> dict:
     """
     Poll one managed switch.  Returns:
@@ -108,6 +111,11 @@ def poll_switch(host: str, community: str = "public") -> dict:
         "mac_table": [],
         "lldp_neighbors": [],
     }
+
+    # 0 ── quick reachability probe (3 s) — bail fast if SNMP is unreachable
+    if not _walk(host, community, _SYS_DESCR, timeout=3):
+        result["error"] = "No SNMP response – check IP, community string and that SNMP is enabled"
+        return result
 
     # 1 ── interface names
     if_names: dict[int, str] = {}
