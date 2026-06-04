@@ -394,6 +394,19 @@ def api_delete_switch(switch_id: int):
         db.delete(sw)
 
 
+@app.get("/api/switches/{switch_id}/poll")
+def api_poll_switch(switch_id: int):
+    """Debug endpoint — runs poll_switch and returns the raw result."""
+    with get_db() as db:
+        sw = db.get(Switch, switch_id)
+        if not sw:
+            raise HTTPException(status_code=404, detail="Switch not found")
+        ip, community = sw.ip_address, sw.community
+    data = poll_switch(ip, community)
+    data["if_names"] = {str(k): v for k, v in data.get("if_names", {}).items()}
+    return data
+
+
 @app.patch("/api/switches/{switch_id}")
 def api_update_switch(switch_id: int, body: SwitchCreate):
     with get_db() as db:
