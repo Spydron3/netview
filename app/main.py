@@ -54,19 +54,23 @@ def _run_scan() -> None:
         nr = get_setting("network_range") or None
         ps = get_setting("port_scan_enabled", "true").lower() == "true"
 
-        # Start passive LLDP capture in background while nmap runs
+        # Start passive LLDP capture in background while nmap runs.
+        # Always listens for the full 30 s (default LLDP advertisement interval)
+        # so every device has a chance to be seen before merging.
         _lldp_stop = threading.Event()
         _lldp_results: list[dict] = []
         def _lldp_worker():
-            _lldp_results.extend(listen_lldp(duration=120, stop_event=_lldp_stop))
+            _lldp_results.extend(listen_lldp(duration=30, stop_event=_lldp_stop))
         lldp_thread = threading.Thread(target=_lldp_worker, daemon=True, name="lldp-capture")
         lldp_thread.start()
 
         try:
             devices, network_range = scan_network(network_range=nr, port_scan=ps)
-        finally:
+        except Exception:
             _lldp_stop.set()
-            lldp_thread.join(timeout=5)
+            raise
+
+        lldp_thread.join()  # wait for full 30 s window to close
 
         # Build LLDP lookup indexes
         lldp_by_mac = {r["src_mac"].lower(): r for r in _lldp_results if r.get("src_mac")}
