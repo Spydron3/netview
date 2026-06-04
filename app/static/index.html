@@ -95,6 +95,7 @@
 
     <div class="topo-toolbar">
       <button id="topo-scan-btn" class="btn" onclick="triggerTopoScan()">Scan Topology</button>
+      <button id="topo-log-btn" class="btn btn-ghost btn-sm" onclick="openTopoLog()" title="View scan log">Log</button>
       <div id="topo-banner" class="scan-banner hidden" style="flex:1">
         <div class="scan-pulse"></div> Polling switches via SNMP…
       </div>
@@ -188,6 +189,21 @@
     <div class="modal-footer">
       <span id="settings-msg" class="settings-msg"></span>
       <button class="btn" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- topology log modal -->
+<div id="topo-log-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-backdrop" onclick="closeTopoLog()"></div>
+  <div class="modal-panel modal-panel-wide">
+    <div class="modal-header">
+      <h2>Topology Scan Log</h2>
+      <span id="topo-log-status" class="badge" style="margin-right:auto;margin-left:.5rem"></span>
+      <button class="modal-close" onclick="closeTopoLog()">✕</button>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <pre id="topo-log-pre" class="log-pre"></pre>
     </div>
   </div>
 </div>

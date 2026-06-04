@@ -69,7 +69,7 @@ function showSettingsMsg(text, error = false) {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeSettings();
+  if (e.key === 'Escape') { closeSettings(); closeTopoLog(); }
 });
 
 // ── data loading ──────────────────────────────────────────────────────────────
@@ -393,6 +393,7 @@ async function triggerTopoScan() {
   try {
     await apiFetch('/api/topology/scan', { method: 'POST' });
     setTopoScanning(true);
+    openTopoLog();
     pollTopoScan();
   } catch (e) {
     el('topo-scan-btn').disabled = false;
@@ -417,6 +418,46 @@ function setTopoScanning(running) {
   btn.disabled = running;
   btn.textContent = running ? 'Scanning…' : 'Scan Topology';
   el('topo-banner').classList.toggle('hidden', !running);
+}
+
+// ── topology log modal ────────────────────────────────────────────────────────
+
+let _logPollTimer = null;
+
+function openTopoLog() {
+  el('topo-log-modal').classList.remove('hidden');
+  refreshTopoLog();
+}
+
+function closeTopoLog() {
+  el('topo-log-modal').classList.add('hidden');
+  clearTimeout(_logPollTimer);
+  _logPollTimer = null;
+}
+
+async function refreshTopoLog() {
+  clearTimeout(_logPollTimer);
+  try {
+    const data = await apiFetch('/api/topology/log');
+    const pre  = el('topo-log-pre');
+    const badge = el('topo-log-status');
+    const atBottom = pre.scrollHeight - pre.scrollTop <= pre.clientHeight + 40;
+
+    pre.textContent = data.lines.length
+      ? data.lines.join('\n')
+      : '— no log yet —';
+
+    badge.textContent = data.running ? 'running' : 'done';
+    badge.className   = 'badge ' + (data.running ? 'badge-running' : 'badge-done');
+
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
+
+    if (data.running) {
+      _logPollTimer = setTimeout(refreshTopoLog, 1000);
+    }
+  } catch (e) {
+    _logPollTimer = setTimeout(refreshTopoLog, 2000);
+  }
 }
 
 // ── topology graph ────────────────────────────────────────────────────────────

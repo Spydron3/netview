@@ -23,8 +23,15 @@ logger = logging.getLogger(__name__)
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
 _topo_lock  = threading.Lock()
-_topo_state: dict = {"running": False, "started_at": None}
+_topo_state: dict = {"running": False, "started_at": None, "log": []}
 _scheduler  = BackgroundScheduler(daemon=True)
+
+
+def _tlog(msg: str) -> None:
+    ts = datetime.utcnow().strftime("%H:%M:%S")
+    line = f"[{ts}] {msg}"
+    logger.info("topo: %s", msg)
+    _topo_state["log"].append(line)
 
 
 def _run_scan() -> None:
@@ -126,6 +133,7 @@ def _run_topo_scan() -> None:
 
     _topo_state["running"] = True
     _topo_state["started_at"] = datetime.utcnow()
+    _topo_state["log"] = []
 
     try:
         with get_db() as db:
@@ -137,13 +145,26 @@ def _run_topo_scan() -> None:
                 for sw in switch_rows
             ]
 
+        if not switches:
+            _tlog("No enabled switches configured.")
+        else:
+            _tlog(f"Found {len(switches)} enabled switch(es).")
+
         for sw in switches:
-            logger.info("Polling switch %s (%s)", sw["ip_address"], sw["name"] or "unnamed")
+            label = sw["name"] or sw["ip_address"]
+            _tlog(f"Polling {label} ({sw['ip_address']}) via SNMP…")
             try:
                 data = poll_switch(sw["ip_address"], sw["community"])
             except Exception as exc:
-                logger.error("poll_switch failed for %s: %s", sw["ip_address"], exc)
+                _tlog(f"  ERROR: {exc}")
                 data = {"error": str(exc), "mac_table": [], "lldp_neighbors": []}
+
+            if data.get("error"):
+                _tlog(f"  SNMP error: {data['error']}")
+            else:
+                mac_count  = len(data.get("mac_table", []))
+                lldp_count = len(data.get("lldp_neighbors", []))
+                _tlog(f"  FDB entries: {mac_count}   LLDP neighbours: {lldp_count}")
 
             with get_db() as db:
                 switch = db.get(Switch, sw["id"])
@@ -151,7 +172,6 @@ def _run_topo_scan() -> None:
                 switch.status = "error" if data.get("error") else "ok"
 
                 if not data.get("error"):
-                    # Replace links for this switch
                     db.execute(sa.delete(TopologyLink).where(TopologyLink.switch_id == sw["id"]))
 
                     for entry in data.get("mac_table", []):
@@ -175,7 +195,13 @@ def _run_topo_scan() -> None:
                             last_seen=datetime.utcnow(),
                         ))
 
+                    saved = len(data.get("mac_table", [])) + len(data.get("lldp_neighbors", []))
+                    _tlog(f"  Saved {saved} topology link(s) for {label}.")
+
+        _tlog("Topology scan complete.")
+
     except Exception as exc:
+        _tlog(f"FATAL: {exc}")
         logger.exception("Topology scan failed: %s", exc)
     finally:
         _topo_state["running"] = False
@@ -395,6 +421,14 @@ def api_topo_status():
     return {
         "running": _topo_state["running"],
         "started_at": _topo_state["started_at"],
+    }
+
+
+@app.get("/api/topology/log")
+def api_topo_log():
+    return {
+        "running": _topo_state["running"],
+        "lines": list(_topo_state["log"]),
     }
 
 
