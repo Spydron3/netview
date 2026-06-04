@@ -69,6 +69,7 @@ function applyFilter() {
     if (!q) return true;
     return (
       (d.ip_address  || '').includes(q) ||
+      (d.name        || '').toLowerCase().includes(q) ||
       (d.hostname    || '').toLowerCase().includes(q) ||
       (d.mac_address || '').toLowerCase().includes(q) ||
       (d.vendor      || '').toLowerCase().includes(q)
@@ -95,6 +96,11 @@ function renderDevices(devices) {
         <div class="status-dot ${statusClass}"></div>
         <span class="device-ip">${esc(d.ip_address)}</span>
       </div>
+      <div class="device-name-row" onclick="startEditName(${d.id}, this)" title="Click to set a name">
+        ${d.name
+          ? `<span class="device-name">${esc(d.name)}</span>`
+          : `<span class="device-name-placeholder">+ Add name</span>`}
+      </div>
       ${d.hostname ? `<div class="device-hostname">${esc(d.hostname)}</div>` : ''}
       ${d.vendor   ? `<div class="device-vendor">${esc(d.vendor)}</div>` : ''}
       ${d.mac_address ? `<div class="device-mac">${esc(d.mac_address)}</div>` : ''}
@@ -110,6 +116,48 @@ function renderDevices(devices) {
       </div>
     </div>`;
   }).join('');
+}
+
+// ── name editing ─────────────────────────────────────────────────────────────
+
+function startEditName(deviceId, row) {
+  if (row.querySelector('input')) return; // already editing
+  const dev = allDevices.find(d => d.id === deviceId);
+  const current = dev?.name || '';
+
+  const input = document.createElement('input');
+  input.className = 'name-input';
+  input.value = current;
+  input.placeholder = 'Device name…';
+  row.innerHTML = '';
+  row.appendChild(input);
+  input.focus();
+  input.select();
+
+  let saved = false;
+
+  async function save() {
+    if (saved) return;
+    saved = true;
+    const name = input.value.trim() || null;
+    try {
+      await apiFetch(`/api/devices/${deviceId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (dev) dev.name = name;
+    } catch (e) {
+      console.error('Failed to save name:', e);
+    }
+    applyFilter();
+  }
+
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { input.blur(); }
+    if (e.key === 'Escape') { saved = true; applyFilter(); }
+  });
 }
 
 // ── scan trigger ──────────────────────────────────────────────────────────────

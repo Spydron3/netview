@@ -10,6 +10,7 @@ class Device(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     ip_address = Column(String(45), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=True)       # user-assigned label
     mac_address = Column(String(17), nullable=True)
     hostname = Column(String(255), nullable=True)
     vendor = Column(String(255), nullable=True)

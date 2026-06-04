@@ -3,7 +3,8 @@ import os
 import time
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
+import sqlalchemy as sa
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from models import Base
@@ -33,6 +34,12 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
             engine = _get_engine()
             Base.metadata.create_all(engine)
             _SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+            # lightweight migrations for columns added after initial deploy
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS name VARCHAR(255)"
+                ))
+                conn.commit()
             logger.info("Database ready")
             return
         except Exception as exc:

@@ -9,6 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from database import get_db, init_db
 from models import Device, ScanRun
@@ -186,6 +187,20 @@ def api_device(device_id: int):
         return _device_to_dict(d)
 
 
+class DeviceUpdate(BaseModel):
+    name: str | None = None
+
+
+@app.patch("/api/devices/{device_id}")
+def api_update_device(device_id: int, body: DeviceUpdate):
+    with get_db() as db:
+        d = db.get(Device, device_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="Device not found")
+        d.name = body.name.strip() if body.name and body.name.strip() else None
+        return _device_to_dict(d)
+
+
 @app.post("/api/scan")
 def api_scan(background_tasks: BackgroundTasks):
     if _scan_state["running"]:
@@ -217,6 +232,7 @@ def _device_to_dict(d: Device) -> dict:
     return {
         "id": d.id,
         "ip_address": d.ip_address,
+        "name": d.name,
         "mac_address": d.mac_address,
         "hostname": d.hostname,
         "vendor": d.vendor,
