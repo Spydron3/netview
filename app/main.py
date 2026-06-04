@@ -156,7 +156,7 @@ def _run_topo_scan() -> None:
 
                     for entry in data.get("mac_table", []):
                         db.add(TopologyLink(
-                            switch_id=sw.id,
+                            switch_id=sw["id"],
                             local_port=entry["port_name"],
                             local_port_index=entry["port_index"],
                             remote_mac=entry["mac"],
@@ -166,7 +166,7 @@ def _run_topo_scan() -> None:
 
                     for nb in data.get("lldp_neighbors", []):
                         db.add(TopologyLink(
-                            switch_id=sw.id,
+                            switch_id=sw["id"],
                             local_port=nb["local_port"],
                             local_port_index=nb["local_port_index"],
                             remote_mac=nb["remote_mac"],
