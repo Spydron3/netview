@@ -124,8 +124,6 @@ def _run_scan() -> None:
     finally:
         _scan_state["running"] = False
         _scan_lock.release()
-        # Run topology scan after every network scan (non-blocking)
-        threading.Thread(target=_run_topo_scan, daemon=True, name="topo-after-scan").start()
 
 
 def _run_topo_scan() -> None:
