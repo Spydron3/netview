@@ -459,6 +459,9 @@ def api_topology():
             if d.mac_address
         }
 
+        # IP → switch lookup (for MAC-based LLDP matching)
+        sw_by_ip = {sw.ip_address: sw for sw in switches}
+
         nodes: list[dict] = []
         edges: list[dict] = []
         seen_nodes: set[str] = set()
@@ -486,8 +489,9 @@ def api_topology():
                 continue  # orphaned link
 
             if link.link_type == "lldp":
-                # Find target switch by sysname or MAC
                 target_sw = None
+
+                # 1. match by sysname vs configured switch name/IP
                 if link.remote_sysname:
                     for sw in switches:
                         if sw.ip_address == link.remote_sysname or (
@@ -495,10 +499,17 @@ def api_topology():
                         ):
                             target_sw = sw
                             break
+
+                # 2. match by remote MAC → device IP → configured switch IP
+                if not target_sw and link.remote_mac:
+                    dev = mac_to_dev.get(link.remote_mac.lower())
+                    if dev:
+                        target_sw = sw_by_ip.get(dev.ip_address)
+
                 if target_sw:
                     tgt = f"sw_{target_sw.id}"
                 else:
-                    # Unknown neighbour switch — add as a ghost node
+                    # Unknown neighbour — ghost node
                     nid_raw = link.remote_mac or link.remote_sysname or str(link.id)
                     tgt = "ext_" + re.sub(r"[^a-z0-9]", "_", nid_raw.lower())
                     _add_node(tgt, {
