@@ -127,8 +127,9 @@ def poll_switch(host: str, community: str = "public") -> dict:
                 pass
 
     if not if_names:
-        result["error"] = "No SNMP response – check IP, community string and that SNMP is enabled"
-        return result
+        # Interface MIBs not supported (some switches only expose LLDP).
+        # Don't bail — continue so LLDP queries can still run.
+        logger.warning("No interface names from %s; Bridge MIB may be unsupported. Trying LLDP anyway.", host)
 
     result["if_names"] = if_names
 
@@ -233,4 +234,9 @@ def poll_switch(host: str, community: str = "public") -> dict:
         })
 
     result["lldp_neighbors"] = neighbors
+
+    # If we got nothing at all — no interfaces, no FDB, no LLDP — SNMP is unreachable
+    if not if_names and not mac_table and not neighbors:
+        result["error"] = "No SNMP response – check IP, community string and that SNMP is enabled"
+
     return result
