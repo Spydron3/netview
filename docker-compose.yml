@@ -9,6 +9,7 @@ services:
       - NET_RAW
     environment:
       DATABASE_URL: postgresql://netview:netview@localhost:5432/netview
+      PORT: "8080"                # web UI port — change if 8080 is also taken
       SCAN_INTERVAL: "300"        # seconds between automatic scans
       NETWORK_RANGE: ""           # leave empty for auto-detect; set e.g. 192.168.1.0/24
       PORT_SCAN_ENABLED: "true"   # set false for faster host-only scans
