@@ -50,7 +50,12 @@ header {
   font-weight: 600;
   color: var(--blue);
 }
-.brand svg { color: var(--blue); }
+.brand-logo {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  object-position: 50% 46%;  /* center on the radar circle, exclude bottom text */
+}
 .header-right { display: flex; align-items: center; gap: 12px; }
 
 .badge {
