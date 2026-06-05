@@ -561,11 +561,8 @@ function pollScan() {
 }
 
 function setScanRunning(running) {
-  const btn    = el('scan-btn');
-  const banner = el('scan-banner');
-  btn.disabled      = running;
-  btn.textContent   = running ? 'Scanning…' : 'Scan Now';
-  banner.classList.toggle('hidden', !running);
+  el('scan-btn').disabled = running;
+  el('stat-last-scan-card').classList.toggle('scanning', running);
 }
 
 // ── auto-refresh ──────────────────────────────────────────────────────────────

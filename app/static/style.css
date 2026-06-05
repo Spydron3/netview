@@ -149,27 +149,12 @@ main {
 .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 
 /* ── scan banner ── */
-.scan-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: color-mix(in srgb, var(--blue) 12%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--blue) 40%, transparent);
-  border-radius: var(--radius);
-  padding: 10px 16px;
-  font-size: 13px;
-  color: var(--blue);
+.stat-card.scanning {
+  animation: scan-blink 2s ease-in-out infinite;
 }
-.scan-banner.hidden { display: none; }
-.scan-pulse {
-  width: 10px; height: 10px;
-  border-radius: 50%;
-  background: var(--blue);
-  animation: pulse 1.2s ease-in-out infinite;
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%       { opacity: .4; transform: scale(.7); }
+@keyframes scan-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .35; }
 }
 
 /* ── toolbar ── */
