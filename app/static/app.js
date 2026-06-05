@@ -807,9 +807,17 @@ function renderTopology(data) {
     edge.attr('d', d => {
       const sx = d.source.x, sy = d.source.y;
       const tx = d.target.x, ty = d.target.y;
-      // orthogonal H-V-H path: go horizontal to mid column, then vertical, then horizontal to target
-      const vx = (sx + tx) / 2 + d.midOffset;
-      return `M${sx},${sy} H${vx} V${ty} H${tx}`;
+      if (d.midOffset === 0) {
+        const vx = (sx + tx) / 2;
+        return `M${sx},${sy} H${vx} V${ty} H${tx}`;
+      }
+      // parallel edges: bezier with control point offset perpendicularly to the line
+      // so curves separate regardless of whether nodes are horizontal or vertical
+      const dx = tx - sx, dy = ty - sy;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const cx = (sx + tx) / 2 - (dy / len) * d.midOffset * 3;
+      const cy = (sy + ty) / 2 + (dx / len) * d.midOffset * 3;
+      return `M${sx},${sy} Q${cx},${cy} ${tx},${ty}`;
     });
     node.attr('transform', d => `translate(${d.x},${d.y})`);
   });
