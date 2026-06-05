@@ -10,14 +10,14 @@ class Device(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     ip_address = Column(String(45), unique=True, nullable=False, index=True)
-    name = Column(String(255), nullable=True)       # user-assigned label
+    name = Column(String(255), nullable=True)
     mac_address = Column(String(17), nullable=True)
     hostname = Column(String(255), nullable=True)
     vendor = Column(String(255), nullable=True)
     os_info = Column(String(255), nullable=True)
     is_online = Column(Boolean, default=True, nullable=False)
     open_ports = Column(JSON, default=list, nullable=False)
-    response_time = Column(Float, nullable=True)  # ms
+    response_time = Column(Float, nullable=True)
     first_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
     last_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
     scan_count = Column(Integer, default=1, nullable=False)
@@ -36,23 +36,18 @@ class Switch(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     ip_address = Column(String(45), unique=True, nullable=False)
     name = Column(String(255), nullable=True)
-    community = Column(String(255), default="public", nullable=False)
-    enabled = Column(Boolean, default=True, nullable=False)
-    last_polled = Column(DateTime, nullable=True)
-    status = Column(String(20), default="unknown", nullable=False)  # ok | error | timeout | unknown
 
 
-class TopologyLink(Base):
-    __tablename__ = "topology_links"
+class SwitchPort(Base):
+    __tablename__ = "switch_ports"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     switch_id = Column(Integer, ForeignKey("switches.id", ondelete="CASCADE"), nullable=False)
-    local_port = Column(String(100), nullable=True)    # human-readable port name
-    local_port_index = Column(Integer, nullable=True)
-    remote_mac = Column(String(17), nullable=True)     # device or remote switch MAC
-    remote_sysname = Column(String(255), nullable=True) # LLDP neighbour system name
-    link_type = Column(String(10), default="device", nullable=False)  # device | lldp
-    last_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
+    port_number = Column(Integer, nullable=False)
+    label = Column(String(100), nullable=True)
+    port_type = Column(String(10), nullable=False, default="RJ45")  # RJ45 | SFP+
+    speed = Column(String(10), nullable=False, default="1G")        # 100M | 1G | 10G | 25G | 40G | 100G
+    device_id = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True)
 
 
 class ScanRun(Base):
@@ -61,7 +56,7 @@ class ScanRun(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     finished_at = Column(DateTime, nullable=True)
-    status = Column(String(20), default="running", nullable=False)  # running | completed | failed
+    status = Column(String(20), default="running", nullable=False)
     network_range = Column(String(50), nullable=True)
     devices_found = Column(Integer, default=0, nullable=False)
     devices_online = Column(Integer, default=0, nullable=False)

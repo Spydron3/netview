@@ -29,7 +29,6 @@
 
 <main>
 
-  <!-- stats always visible -->
   <div class="stats-row">
     <div class="stat-card">
       <div class="stat-value" id="stat-total">—</div>
@@ -54,7 +53,6 @@
     Scanning network…
   </div>
 
-  <!-- tab bar -->
   <div class="tab-bar">
     <button class="tab active" data-tab="devices" onclick="switchTab('devices')">Devices</button>
     <button class="tab" data-tab="topology" onclick="switchTab('topology')">Topology</button>
@@ -93,36 +91,25 @@
   <!-- ── topology tab ── -->
   <div id="tab-topology" class="tab-content hidden">
 
-    <div class="topo-toolbar">
-      <button id="topo-scan-btn" class="btn" onclick="triggerTopoScan()">Scan Topology</button>
-      <button id="topo-log-btn" class="btn btn-ghost btn-sm" onclick="openTopoLog()" title="View scan log">Log</button>
-      <div id="topo-banner" class="scan-banner hidden" style="flex:1">
-        <div class="scan-pulse"></div> Polling switches via SNMP…
-      </div>
-    </div>
-
     <div class="topo-layout">
 
       <!-- graph area -->
       <div class="topo-graph-wrap" id="topo-graph-wrap">
         <div id="topo-empty" class="topo-empty hidden">
           <p>No switches configured yet.</p>
-          <p>Add a managed switch below to build the topology map.</p>
+          <p>Add a managed switch and assign devices to ports to build the topology map.</p>
         </div>
         <svg id="topo-svg"></svg>
 
-        <!-- node detail side-panel -->
         <div id="node-detail" class="node-detail hidden">
           <button class="node-detail-close" onclick="closeNodeDetail()">✕</button>
           <div id="node-detail-body"></div>
         </div>
 
-        <!-- legend -->
         <div class="topo-legend">
           <span class="legend-item"><span class="legend-dot switch"></span>Switch</span>
           <span class="legend-item"><span class="legend-dot online"></span>Online</span>
           <span class="legend-item"><span class="legend-dot offline"></span>Offline</span>
-          <span class="legend-item"><span class="legend-dot unknown"></span>Unknown</span>
         </div>
       </div>
 
@@ -134,9 +121,8 @@
         </div>
 
         <div id="add-switch-form" class="add-switch-form hidden">
-          <input id="sw-ip"        type="text" placeholder="IP address *" />
-          <input id="sw-name"      type="text" placeholder="Name (optional)" />
-          <input id="sw-community" type="text" placeholder="SNMP community (default: public)" />
+          <input id="sw-ip"   type="text" placeholder="IP address *" />
+          <input id="sw-name" type="text" placeholder="Name (optional)" />
           <div class="form-row">
             <button class="btn btn-sm" onclick="addSwitch()">Save</button>
             <button class="btn btn-sm btn-ghost" onclick="hideAddSwitchForm()">Cancel</button>
@@ -152,7 +138,7 @@
 
 </main>
 
-<!-- settings modal -->
+<!-- ── settings modal ── -->
 <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true">
   <div class="modal-backdrop" onclick="closeSettings()"></div>
   <div class="modal-panel">
@@ -193,17 +179,67 @@
   </div>
 </div>
 
-<!-- topology log modal -->
-<div id="topo-log-modal" class="modal hidden" role="dialog" aria-modal="true">
-  <div class="modal-backdrop" onclick="closeTopoLog()"></div>
+<!-- ── switch ports modal ── -->
+<div id="ports-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-backdrop" onclick="closePortsModal()"></div>
   <div class="modal-panel modal-panel-wide">
     <div class="modal-header">
-      <h2>Topology Scan Log</h2>
-      <span id="topo-log-status" class="badge" style="margin-right:auto;margin-left:.5rem"></span>
-      <button class="modal-close" onclick="closeTopoLog()">✕</button>
+      <div>
+        <h2 id="ports-modal-title">Switch Ports</h2>
+        <div id="ports-modal-sub" class="modal-subtitle"></div>
+      </div>
+      <button class="modal-close" onclick="closePortsModal()">✕</button>
     </div>
-    <div class="modal-body" style="padding:0">
-      <pre id="topo-log-pre" class="log-pre"></pre>
+    <div class="modal-body" style="padding:0; overflow-y:auto; max-height:calc(100vh - 220px)">
+
+      <div id="ports-table-wrap">
+        <table class="ports-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Label</th>
+              <th>Type</th>
+              <th>Speed</th>
+              <th>Device</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="ports-tbody"></tbody>
+        </table>
+        <p id="ports-empty" class="empty-sw hidden">No ports configured yet.</p>
+      </div>
+
+      <!-- add port section -->
+      <div class="add-port-section">
+        <div class="add-port-header">Add ports</div>
+        <div class="add-port-form">
+          <div class="add-port-row">
+            <label>Count</label>
+            <input id="ap-count" type="number" min="1" max="96" value="1" class="port-input-sm" />
+            <label>Type</label>
+            <select id="ap-type" class="port-select">
+              <option value="RJ45">RJ45</option>
+              <option value="SFP+">SFP+</option>
+            </select>
+            <label>Speed</label>
+            <select id="ap-speed" class="port-select">
+              <option value="10M">10M</option>
+              <option value="100M">100M</option>
+              <option value="1G" selected>1G</option>
+              <option value="2.5G">2.5G</option>
+              <option value="10G">10G</option>
+              <option value="25G">25G</option>
+              <option value="40G">40G</option>
+              <option value="100G">100G</option>
+            </select>
+          </div>
+          <div class="add-port-row">
+            <button class="btn btn-sm" onclick="addPorts()">Add Ports</button>
+            <span id="ap-error" class="form-error"></span>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>

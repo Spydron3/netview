@@ -1,8 +1,6 @@
 import logging
 import os
-import re
 import threading
-import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -14,26 +12,18 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from database import get_db, get_setting, init_db, set_setting
-from lldp_scanner import listen_lldp  # used in _run_topo_scan
-from models import Device, ScanRun, Setting, Switch, TopologyLink
+from models import Device, ScanRun, Setting, Switch, SwitchPort
 from scanner import get_network_range, scan_network
-from snmp_scanner import poll_switch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
-_topo_lock  = threading.Lock()
-_topo_state: dict = {"running": False, "started_at": None, "log": []}
 _scheduler  = BackgroundScheduler(daemon=True)
 
-
-def _tlog(msg: str) -> None:
-    ts = datetime.utcnow().strftime("%H:%M:%S")
-    line = f"[{ts}] {msg}"
-    logger.info("topo: %s", msg)
-    _topo_state["log"].append(line)
+_VALID_PORT_TYPES = {"RJ45", "SFP+"}
+_VALID_SPEEDS     = {"10M", "100M", "1G", "2.5G", "10G", "25G", "40G", "100G"}
 
 
 def _run_scan() -> None:
@@ -128,134 +118,6 @@ def _run_scan() -> None:
         _scan_lock.release()
 
 
-def _run_topo_scan() -> None:
-    if not _topo_lock.acquire(blocking=False):
-        logger.info("Topology scan already running — skipping")
-        return
-
-    _topo_state["running"] = True
-    _topo_state["started_at"] = datetime.utcnow()
-    _topo_state["log"] = []
-
-    try:
-        with get_db() as db:
-            switch_rows = db.execute(
-                sa.select(Switch).where(Switch.enabled.is_(True))
-            ).scalars().all()
-            switches = [
-                {"id": sw.id, "ip_address": sw.ip_address, "name": sw.name, "community": sw.community}
-                for sw in switch_rows
-            ]
-
-        if not switches:
-            _tlog("No enabled switches configured.")
-        else:
-            _tlog(f"Found {len(switches)} enabled switch(es).")
-
-        # Passive LLDP capture runs in parallel with SNMP polling.
-        # Listens for 30 s so every device gets a chance to advertise.
-        _lldp_results: list[dict] = []
-        _lldp_duration = 30
-
-        def _lldp_worker():
-            listen_lldp(duration=_lldp_duration, out=_lldp_results)
-
-        lldp_thread = threading.Thread(target=_lldp_worker, daemon=True, name="lldp-capture")
-        lldp_thread.start()
-        _lldp_start = time.monotonic()
-        _tlog("Passive LLDP capture started (30 s)…")
-
-        def _lldp_progress():
-            while lldp_thread.is_alive():
-                time.sleep(5)
-                if not lldp_thread.is_alive():
-                    break
-                elapsed = int(time.monotonic() - _lldp_start)
-                _tlog(f"  LLDP: {elapsed}s / {_lldp_duration}s — {len(_lldp_results)} device(s) seen")
-
-        threading.Thread(target=_lldp_progress, daemon=True, name="lldp-progress").start()
-
-        for sw in switches:
-            label = sw["name"] or sw["ip_address"]
-            _tlog(f"Polling {label} ({sw['ip_address']}) via SNMP…")
-            try:
-                data = poll_switch(sw["ip_address"], sw["community"])
-            except Exception as exc:
-                _tlog(f"  ERROR: {exc}")
-                data = {"error": str(exc), "mac_table": [], "lldp_neighbors": []}
-
-            if data.get("error"):
-                _tlog(f"  SNMP error: {data['error']}")
-            else:
-                mac_count  = len(data.get("mac_table", []))
-                lldp_count = len(data.get("lldp_neighbors", []))
-                mac_label  = "ARP entries" if data.get("arp_fallback") else "FDB entries"
-                _tlog(f"  {mac_label}: {mac_count}   LLDP neighbours: {lldp_count}")
-
-            with get_db() as db:
-                switch = db.get(Switch, sw["id"])
-                switch.last_polled = datetime.utcnow()
-                switch.status = "error" if data.get("error") else "ok"
-
-                if not data.get("error"):
-                    db.execute(sa.delete(TopologyLink).where(TopologyLink.switch_id == sw["id"]))
-
-                    for entry in data.get("mac_table", []):
-                        db.add(TopologyLink(
-                            switch_id=sw["id"],
-                            local_port=entry["port_name"],
-                            local_port_index=entry["port_index"],
-                            remote_mac=entry["mac"].lower() if entry.get("mac") else None,
-                            link_type="device",
-                            last_seen=datetime.utcnow(),
-                        ))
-
-                    for nb in data.get("lldp_neighbors", []):
-                        db.add(TopologyLink(
-                            switch_id=sw["id"],
-                            local_port=nb["local_port"],
-                            local_port_index=nb["local_port_index"],
-                            remote_mac=nb["remote_mac"].lower() if nb.get("remote_mac") else None,
-                            remote_sysname=nb["remote_sysname"],
-                            link_type="lldp",
-                            last_seen=datetime.utcnow(),
-                        ))
-
-                    saved = len(data.get("mac_table", [])) + len(data.get("lldp_neighbors", []))
-                    _tlog(f"  Saved {saved} topology link(s) for {label}.")
-
-        # Wait for LLDP capture to finish, then merge into device records
-        lldp_thread.join()
-        if _lldp_results:
-            _tlog(f"LLDP captured {len(_lldp_results)} device(s) — merging into device records…")
-            lldp_by_mac = {r["src_mac"].lower(): r for r in _lldp_results if r.get("src_mac")}
-            lldp_by_ip  = {r["mgmt_ip"]: r for r in _lldp_results if r.get("mgmt_ip")}
-            with get_db() as db:
-                all_devs = db.execute(sa.select(Device)).scalars().all()
-                for dev in all_devs:
-                    lldp = lldp_by_mac.get((dev.mac_address or "").lower()) \
-                        or lldp_by_ip.get(dev.ip_address)
-                    if not lldp:
-                        continue
-                    if not dev.hostname and lldp.get("system_name"):
-                        dev.hostname = lldp["system_name"]
-                    if not dev.os_info and lldp.get("system_desc"):
-                        dev.os_info = lldp["system_desc"]
-                    if not dev.mac_address and lldp.get("chassis_mac"):
-                        dev.mac_address = lldp["chassis_mac"]
-        else:
-            _tlog("No LLDP frames captured.")
-
-        _tlog("Topology scan complete.")
-
-    except Exception as exc:
-        _tlog(f"FATAL: {exc}")
-        logger.exception("Topology scan failed: %s", exc)
-    finally:
-        _topo_state["running"] = False
-        _topo_lock.release()
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -280,7 +142,7 @@ def index():
     return FileResponse("static/index.html")
 
 
-# ── API ──────────────────────────────────────────────────────────────────────
+# ── stats ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/stats")
 def api_stats():
@@ -307,31 +169,94 @@ def api_stats():
         }
 
 
+# ── devices ───────────────────────────────────────────────────────────────────
+
 @app.get("/api/devices")
 def api_devices():
     with get_db() as db:
-        # Sort: online first, then by inet order (cast required for numeric IP sort in PG)
         from sqlalchemy.dialects.postgresql import INET
         rows = db.execute(
-            sa.select(Device).order_by(
-                Device.is_online.desc(),
-                sa.cast(Device.ip_address, INET),
-            )
-        ).scalars().all()
-        return [_device_to_dict(d) for d in rows]
+            sa.select(Device, SwitchPort, Switch)
+            .outerjoin(SwitchPort, SwitchPort.device_id == Device.id)
+            .outerjoin(Switch, Switch.id == SwitchPort.switch_id)
+            .order_by(Device.is_online.desc(), sa.cast(Device.ip_address, INET))
+        ).all()
+        return [_device_to_dict(d, p, s) for d, p, s in rows]
 
 
 @app.get("/api/devices/{device_id}")
 def api_device(device_id: int):
     with get_db() as db:
+        row = db.execute(
+            sa.select(Device, SwitchPort, Switch)
+            .outerjoin(SwitchPort, SwitchPort.device_id == Device.id)
+            .outerjoin(Switch, Switch.id == SwitchPort.switch_id)
+            .where(Device.id == device_id)
+        ).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return _device_to_dict(*row)
+
+
+class DeviceUpdate(BaseModel):
+    name: str | None = None
+
+
+@app.patch("/api/devices/{device_id}")
+def api_update_device(device_id: int, body: DeviceUpdate):
+    with get_db() as db:
         d = db.get(Device, device_id)
         if not d:
             raise HTTPException(status_code=404, detail="Device not found")
-        return _device_to_dict(d)
+        d.name = body.name.strip() if body.name and body.name.strip() else None
 
+        row = db.execute(
+            sa.select(Device, SwitchPort, Switch)
+            .outerjoin(SwitchPort, SwitchPort.device_id == Device.id)
+            .outerjoin(Switch, Switch.id == SwitchPort.switch_id)
+            .where(Device.id == device_id)
+        ).first()
+        return _device_to_dict(*row) if row else _device_to_dict(d)
+
+
+class DevicePortAssign(BaseModel):
+    switch_port_id: int | None
+
+
+@app.put("/api/devices/{device_id}/port")
+def api_assign_device_port(device_id: int, body: DevicePortAssign):
+    with get_db() as db:
+        device = db.get(Device, device_id)
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        # clear any existing port assignment for this device
+        existing = db.execute(
+            sa.select(SwitchPort).where(SwitchPort.device_id == device_id)
+        ).scalars().all()
+        for p in existing:
+            p.device_id = None
+
+        new_port = None
+        new_switch = None
+        if body.switch_port_id is not None:
+            new_port = db.get(SwitchPort, body.switch_port_id)
+            if not new_port:
+                raise HTTPException(status_code=404, detail="Port not found")
+            # if port is currently claimed by another device, release it
+            if new_port.device_id is not None and new_port.device_id != device_id:
+                new_port.device_id = None
+                db.flush()
+            new_port.device_id = device_id
+            new_switch = db.get(Switch, new_port.switch_id)
+
+        return _device_to_dict(device, new_port, new_switch)
+
+
+# ── settings ──────────────────────────────────────────────────────────────────
 
 class SettingsUpdate(BaseModel):
-    scan_interval: int | None = None   # seconds
+    scan_interval: int | None = None
     port_scan_enabled: bool | None = None
     network_range: str | None = None
 
@@ -360,19 +285,7 @@ def api_put_settings(body: SettingsUpdate):
     return {"status": "ok"}
 
 
-class DeviceUpdate(BaseModel):
-    name: str | None = None
-
-
-@app.patch("/api/devices/{device_id}")
-def api_update_device(device_id: int, body: DeviceUpdate):
-    with get_db() as db:
-        d = db.get(Device, device_id)
-        if not d:
-            raise HTTPException(status_code=404, detail="Device not found")
-        d.name = body.name.strip() if body.name and body.name.strip() else None
-        return _device_to_dict(d)
-
+# ── scan ──────────────────────────────────────────────────────────────────────
 
 @app.post("/api/scan")
 def api_scan(background_tasks: BackgroundTasks):
@@ -399,19 +312,27 @@ def api_scan_history():
         return [_scan_to_dict(r) for r in rows]
 
 
-# ── switches ─────────────────────────────────────────────────────────────────
+# ── switches ──────────────────────────────────────────────────────────────────
 
 class SwitchCreate(BaseModel):
     ip_address: str
     name: str | None = None
-    community: str = "public"
 
 
 @app.get("/api/switches")
 def api_list_switches():
     with get_db() as db:
         rows = db.execute(sa.select(Switch).order_by(Switch.ip_address)).scalars().all()
-        return [_switch_to_dict(s) for s in rows]
+        switch_ids = [s.id for s in rows]
+        counts = {}
+        if switch_ids:
+            for sw_id, cnt in db.execute(
+                sa.select(SwitchPort.switch_id, sa.func.count(SwitchPort.id))
+                .where(SwitchPort.switch_id.in_(switch_ids))
+                .group_by(SwitchPort.switch_id)
+            ).all():
+                counts[sw_id] = cnt
+        return [_switch_to_dict(s, counts.get(s.id, 0)) for s in rows]
 
 
 @app.post("/api/switches", status_code=201)
@@ -422,14 +343,10 @@ def api_add_switch(body: SwitchCreate):
         ).scalar_one_or_none()
         if existing:
             raise HTTPException(status_code=409, detail="Switch already exists")
-        sw = Switch(
-            ip_address=body.ip_address,
-            name=body.name,
-            community=body.community or "public",
-        )
+        sw = Switch(ip_address=body.ip_address, name=body.name)
         db.add(sw)
         db.flush()
-        return _switch_to_dict(sw)
+        return _switch_to_dict(sw, 0)
 
 
 @app.delete("/api/switches/{switch_id}", status_code=204)
@@ -438,21 +355,7 @@ def api_delete_switch(switch_id: int):
         sw = db.get(Switch, switch_id)
         if not sw:
             raise HTTPException(status_code=404, detail="Switch not found")
-        db.execute(sa.delete(TopologyLink).where(TopologyLink.switch_id == switch_id))
         db.delete(sw)
-
-
-@app.get("/api/switches/{switch_id}/poll")
-def api_poll_switch(switch_id: int):
-    """Debug endpoint — runs poll_switch and returns the raw result."""
-    with get_db() as db:
-        sw = db.get(Switch, switch_id)
-        if not sw:
-            raise HTTPException(status_code=404, detail="Switch not found")
-        ip, community = sw.ip_address, sw.community
-    data = poll_switch(ip, community)
-    data["if_names"] = {str(k): v for k, v in data.get("if_names", {}).items()}
-    return data
 
 
 @app.patch("/api/switches/{switch_id}")
@@ -463,162 +366,204 @@ def api_update_switch(switch_id: int, body: SwitchCreate):
             raise HTTPException(status_code=404, detail="Switch not found")
         sw.ip_address = body.ip_address
         sw.name = body.name
-        sw.community = body.community or "public"
-        return _switch_to_dict(sw)
+        port_count = db.execute(
+            sa.select(sa.func.count(SwitchPort.id)).where(SwitchPort.switch_id == switch_id)
+        ).scalar_one()
+        return _switch_to_dict(sw, port_count)
 
 
-# ── topology ──────────────────────────────────────────────────────────────────
+# ── switch ports ──────────────────────────────────────────────────────────────
 
-@app.post("/api/topology/scan")
-def api_topo_scan(background_tasks: BackgroundTasks):
-    if _topo_state["running"]:
-        return {"status": "already_running", "started_at": _topo_state["started_at"]}
-    background_tasks.add_task(_run_topo_scan)
-    return {"status": "started"}
-
-
-@app.get("/api/topology/status")
-def api_topo_status():
-    return {
-        "running": _topo_state["running"],
-        "started_at": _topo_state["started_at"],
-    }
+class PortCreate(BaseModel):
+    port_number: int
+    port_type: str = "RJ45"
+    speed: str = "1G"
+    label: str | None = None
+    device_id: int | None = None
 
 
-@app.get("/api/topology/log")
-def api_topo_log():
-    return {
-        "running": _topo_state["running"],
-        "lines": list(_topo_state["log"]),
-    }
+class PortUpdate(BaseModel):
+    port_type: str | None = None
+    speed: str | None = None
+    label: str | None = None
+    device_id: int | None = None
 
+
+@app.get("/api/switches/{switch_id}/ports")
+def api_list_ports(switch_id: int):
+    with get_db() as db:
+        sw = db.get(Switch, switch_id)
+        if not sw:
+            raise HTTPException(status_code=404, detail="Switch not found")
+        rows = db.execute(
+            sa.select(SwitchPort, Device)
+            .outerjoin(Device, Device.id == SwitchPort.device_id)
+            .where(SwitchPort.switch_id == switch_id)
+            .order_by(SwitchPort.port_number)
+        ).all()
+        return [_port_to_dict(p, sw, d) for p, d in rows]
+
+
+@app.post("/api/switches/{switch_id}/ports", status_code=201)
+def api_add_port(switch_id: int, body: PortCreate):
+    with get_db() as db:
+        sw = db.get(Switch, switch_id)
+        if not sw:
+            raise HTTPException(status_code=404, detail="Switch not found")
+        if body.port_type not in _VALID_PORT_TYPES:
+            raise HTTPException(status_code=422, detail=f"port_type must be one of {sorted(_VALID_PORT_TYPES)}")
+        if body.speed not in _VALID_SPEEDS:
+            raise HTTPException(status_code=422, detail=f"speed must be one of {sorted(_VALID_SPEEDS)}")
+        port = SwitchPort(
+            switch_id=switch_id,
+            port_number=body.port_number,
+            port_type=body.port_type,
+            speed=body.speed,
+            label=body.label,
+            device_id=body.device_id,
+        )
+        db.add(port)
+        db.flush()
+        dev = db.get(Device, port.device_id) if port.device_id else None
+        return _port_to_dict(port, sw, dev)
+
+
+@app.patch("/api/switches/{switch_id}/ports/{port_id}")
+def api_update_port(switch_id: int, port_id: int, body: PortUpdate):
+    with get_db() as db:
+        sw = db.get(Switch, switch_id)
+        if not sw:
+            raise HTTPException(status_code=404, detail="Switch not found")
+        port = db.get(SwitchPort, port_id)
+        if not port or port.switch_id != switch_id:
+            raise HTTPException(status_code=404, detail="Port not found")
+
+        fields = body.model_fields_set if hasattr(body, "model_fields_set") else body.__fields_set__
+
+        if "port_type" in fields and body.port_type is not None:
+            if body.port_type not in _VALID_PORT_TYPES:
+                raise HTTPException(status_code=422, detail=f"port_type must be one of {sorted(_VALID_PORT_TYPES)}")
+            port.port_type = body.port_type
+        if "speed" in fields and body.speed is not None:
+            if body.speed not in _VALID_SPEEDS:
+                raise HTTPException(status_code=422, detail=f"speed must be one of {sorted(_VALID_SPEEDS)}")
+            port.speed = body.speed
+        if "label" in fields:
+            port.label = body.label
+        if "device_id" in fields:
+            if body.device_id is not None:
+                # release device from any other port first
+                db.execute(
+                    sa.update(SwitchPort)
+                    .where(SwitchPort.device_id == body.device_id, SwitchPort.id != port_id)
+                    .values(device_id=None)
+                )
+            port.device_id = body.device_id
+
+        db.flush()
+        dev = db.get(Device, port.device_id) if port.device_id else None
+        return _port_to_dict(port, sw, dev)
+
+
+@app.delete("/api/switches/{switch_id}/ports/{port_id}", status_code=204)
+def api_delete_port(switch_id: int, port_id: int):
+    with get_db() as db:
+        port = db.get(SwitchPort, port_id)
+        if not port or port.switch_id != switch_id:
+            raise HTTPException(status_code=404, detail="Port not found")
+        db.delete(port)
+
+
+# ── all ports (for dropdowns) ─────────────────────────────────────────────────
+
+@app.get("/api/ports")
+def api_all_ports():
+    with get_db() as db:
+        rows = db.execute(
+            sa.select(SwitchPort, Switch, Device)
+            .join(Switch, Switch.id == SwitchPort.switch_id)
+            .outerjoin(Device, Device.id == SwitchPort.device_id)
+            .order_by(Switch.ip_address, SwitchPort.port_number)
+        ).all()
+        return [_port_to_dict(p, s, d) for p, s, d in rows]
+
+
+# ── topology (manual) ─────────────────────────────────────────────────────────
 
 @app.get("/api/topology")
 def api_topology():
     with get_db() as db:
         switches = db.execute(sa.select(Switch)).scalars().all()
-        links    = db.execute(sa.select(TopologyLink)).scalars().all()
-        devices  = db.execute(sa.select(Device)).scalars().all()
-
-        # MAC → device lookup (inside session so attributes are accessible)
-        mac_to_dev = {
-            d.mac_address.lower(): d
-            for d in devices
-            if d.mac_address
-        }
-
-        # IP → switch lookup (for MAC-based LLDP matching)
-        sw_by_ip = {sw.ip_address: sw for sw in switches}
+        ports_with_devices = db.execute(
+            sa.select(SwitchPort, Device)
+            .join(Device, Device.id == SwitchPort.device_id)
+        ).all()
 
         nodes: list[dict] = []
         edges: list[dict] = []
-        seen_nodes: set[str] = set()
+        seen: set[str] = set()
 
-        def _add_node(nid: str, node: dict):
-            if nid not in seen_nodes:
-                nodes.append({"id": nid, **node})
-                seen_nodes.add(nid)
-
-        # Switch nodes
         for sw in switches:
-            _add_node(f"sw_{sw.id}", {
-                "type": "switch",
+            nid = f"sw_{sw.id}"
+            nodes.append({
+                "id": nid, "type": "switch",
                 "label": sw.name or sw.ip_address,
-                "ip": sw.ip_address,
-                "name": sw.name,
-                "status": sw.status,
-                "last_polled": sw.last_polled.isoformat() if sw.last_polled else None,
+                "ip": sw.ip_address, "name": sw.name,
             })
+            seen.add(nid)
 
-        # Build edges from topology links
-        for link in links:
-            src = f"sw_{link.switch_id}"
-            if src not in seen_nodes:
-                continue  # orphaned link
-
-            if link.link_type == "lldp":
-                target_sw = None
-
-                # 1. match by sysname vs configured switch name/IP
-                if link.remote_sysname:
-                    for sw in switches:
-                        if sw.ip_address == link.remote_sysname or (
-                            sw.name and sw.name.lower() == link.remote_sysname.lower()
-                        ):
-                            target_sw = sw
-                            break
-
-                # 2. match by remote MAC → device IP → configured switch IP
-                if not target_sw and link.remote_mac:
-                    dev = mac_to_dev.get(link.remote_mac.lower())
-                    if dev:
-                        target_sw = sw_by_ip.get(dev.ip_address)
-
-                if target_sw:
-                    tgt = f"sw_{target_sw.id}"
-                else:
-                    # Unknown neighbour — ghost node
-                    nid_raw = link.remote_mac or link.remote_sysname or str(link.id)
-                    tgt = "ext_" + re.sub(r"[^a-z0-9]", "_", nid_raw.lower())
-                    _add_node(tgt, {
-                        "type": "external_switch",
-                        "label": link.remote_sysname or link.remote_mac or "Unknown switch",
-                        "mac": link.remote_mac,
-                        "sysname": link.remote_sysname,
-                    })
-                edges.append({
-                    "source": src, "target": tgt,
-                    "port": link.local_port, "type": "lldp",
+        for port, dev in ports_with_devices:
+            src = f"sw_{port.switch_id}"
+            if src not in seen:
+                continue
+            tgt = f"dev_{dev.id}"
+            if tgt not in seen:
+                nodes.append({
+                    "id": tgt, "type": "device",
+                    "label": dev.name or dev.hostname or dev.ip_address,
+                    "ip": dev.ip_address, "mac": dev.mac_address,
+                    "hostname": dev.hostname, "vendor": dev.vendor,
+                    "name": dev.name, "is_online": dev.is_online,
                 })
-
-            else:  # device link from MAC table
-                if not link.remote_mac:
-                    continue
-                dev = mac_to_dev.get(link.remote_mac.lower())
-                if dev:
-                    tgt = f"dev_{dev.id}"
-                    _add_node(tgt, {
-                        "type": "device",
-                        "label": dev.name or dev.hostname or dev.ip_address,
-                        "ip": dev.ip_address,
-                        "mac": dev.mac_address,
-                        "hostname": dev.hostname,
-                        "vendor": dev.vendor,
-                        "name": dev.name,
-                        "is_online": dev.is_online,
-                    })
-                else:
-                    # MAC seen on switch but not yet in devices table
-                    tgt = "mac_" + link.remote_mac.lower().replace(":", "")
-                    _add_node(tgt, {
-                        "type": "unknown_device",
-                        "label": link.remote_mac,
-                        "mac": link.remote_mac,
-                        "is_online": None,
-                    })
-                edges.append({
-                    "source": src, "target": tgt,
-                    "port": link.local_port, "type": "device",
-                })
+                seen.add(tgt)
+            edges.append({
+                "source": src, "target": tgt,
+                "port": port.label or f"Port {port.port_number}",
+                "port_type": port.port_type,
+                "speed": port.speed,
+                "type": "port",
+            })
 
     return {"nodes": nodes, "edges": edges}
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _switch_to_dict(s: Switch) -> dict:
+def _switch_to_dict(s: Switch, port_count: int = 0) -> dict:
     return {
         "id": s.id,
         "ip_address": s.ip_address,
         "name": s.name,
-        "community": s.community,
-        "enabled": s.enabled,
-        "status": s.status,
-        "last_polled": s.last_polled.isoformat() if s.last_polled else None,
+        "port_count": port_count,
     }
 
 
-def _device_to_dict(d: Device) -> dict:
+def _port_to_dict(p: SwitchPort, sw: Switch, dev: Device | None) -> dict:
+    return {
+        "id": p.id,
+        "switch_id": p.switch_id,
+        "switch_name": sw.name or sw.ip_address,
+        "switch_ip": sw.ip_address,
+        "port_number": p.port_number,
+        "label": p.label,
+        "port_type": p.port_type,
+        "speed": p.speed,
+        "device_id": p.device_id,
+        "device_label": (dev.name or dev.hostname or dev.ip_address) if dev else None,
+    }
+
+
+def _device_to_dict(d: Device, port: SwitchPort | None = None, sw: Switch | None = None) -> dict:
     return {
         "id": d.id,
         "ip_address": d.ip_address,
@@ -633,6 +578,16 @@ def _device_to_dict(d: Device) -> dict:
         "first_seen": d.first_seen.isoformat() if d.first_seen else None,
         "last_seen": d.last_seen.isoformat() if d.last_seen else None,
         "scan_count": d.scan_count,
+        "switch_port": {
+            "id": port.id,
+            "switch_id": port.switch_id,
+            "switch_name": sw.name or sw.ip_address,
+            "switch_ip": sw.ip_address,
+            "port_number": port.port_number,
+            "label": port.label,
+            "port_type": port.port_type,
+            "speed": port.speed,
+        } if port and sw else None,
     }
 
 

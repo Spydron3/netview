@@ -40,6 +40,13 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                 conn.execute(text(
                     "ALTER TABLE devices ADD COLUMN IF NOT EXISTS name VARCHAR(255)"
                 ))
+                # remove legacy SNMP columns from switches (idempotent)
+                for col in ("community", "enabled", "last_polled", "status"):
+                    conn.execute(text(
+                        f"ALTER TABLE switches DROP COLUMN IF EXISTS {col}"
+                    ))
+                # drop legacy topology_links table
+                conn.execute(text("DROP TABLE IF EXISTS topology_links"))
                 # seed default settings from env vars on first run
                 defaults = {
                     "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),

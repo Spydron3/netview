@@ -1,13 +1,14 @@
 'use strict';
 
 let allDevices = [];
-let pollTimer = null;
+let allPorts   = [];   // flat list from GET /api/ports — used for device dropdowns
+let pollTimer  = null;
 let currentTab = 'devices';
 
 // ── bootstrap ─────────────────────────────────────────────────────────────────
 
 (async function init() {
-  await Promise.all([loadStats(), loadDevices(), loadHistory()]);
+  await Promise.all([loadStats(), loadDevices(), loadHistory(), loadAllPorts()]);
   startAutoRefresh();
 })();
 
@@ -69,7 +70,7 @@ function showSettingsMsg(text, error = false) {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeSettings(); closeTopoLog(); }
+  if (e.key === 'Escape') { closeSettings(); closePortsModal(); }
 });
 
 // ── data loading ──────────────────────────────────────────────────────────────
@@ -98,6 +99,14 @@ async function loadDevices() {
     applyFilter();
   } catch (e) {
     console.error('loadDevices:', e);
+  }
+}
+
+async function loadAllPorts() {
+  try {
+    allPorts = await apiFetch('/api/ports');
+  } catch (e) {
+    console.error('loadAllPorts:', e);
   }
 }
 
@@ -152,6 +161,7 @@ function renderDevices(devices) {
     const statusClass = d.is_online ? 'online' : 'offline';
     const ports = (d.open_ports || []).slice(0, 6);
     const extra = (d.open_ports || []).length - ports.length;
+    const portInfo = d.switch_port;
 
     return `<div class="device-card ${d.is_online ? '' : 'offline'}">
       <div class="device-top">
@@ -171,6 +181,9 @@ function renderDevices(devices) {
           ${ports.map(p => `<span class="port-chip" title="${esc(p.service || p.protocol)}">${p.port}</span>`).join('')}
           ${extra > 0 ? `<span class="port-more">+${extra} more</span>` : ''}
         </div>` : ''}
+      <div class="device-port-row">
+        ${renderPortSelect(d.id, portInfo)}
+      </div>
       <div class="device-footer">
         ${d.is_online
           ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}`
@@ -180,10 +193,61 @@ function renderDevices(devices) {
   }).join('');
 }
 
+function renderPortSelect(deviceId, currentPort) {
+  // Group allPorts by switch
+  const bySwitch = {};
+  for (const p of allPorts) {
+    if (!bySwitch[p.switch_id]) bySwitch[p.switch_id] = { name: p.switch_name, ports: [] };
+    bySwitch[p.switch_id].ports.push(p);
+  }
+
+  const currentPortId = currentPort ? currentPort.id : '';
+  let opts = `<option value="">— no port —</option>`;
+  for (const swId of Object.keys(bySwitch)) {
+    const sw = bySwitch[swId];
+    opts += `<optgroup label="${esc(sw.name)}">`;
+    for (const p of sw.ports) {
+      const label = `${p.label || ('Port ' + p.port_number)} (${p.port_type} · ${p.speed})`;
+      const taken = p.device_id && p.device_id !== deviceId
+        ? ` — ${esc(p.device_label || 'in use')}` : '';
+      opts += `<option value="${p.id}" ${p.id === currentPortId ? 'selected' : ''}>${esc(label)}${taken}</option>`;
+    }
+    opts += `</optgroup>`;
+  }
+
+  const label = currentPort
+    ? `${currentPort.switch_name}: ${currentPort.label || ('Port ' + currentPort.port_number)}`
+    : 'No port';
+
+  return `<select class="port-assign-select" title="${esc(label)}"
+    onchange="assignDevicePort(${deviceId}, this)">${opts}</select>`;
+}
+
+async function assignDevicePort(deviceId, selectEl) {
+  const portId = selectEl.value ? parseInt(selectEl.value) : null;
+  try {
+    const updated = await apiFetch(`/api/devices/${deviceId}/port`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ switch_port_id: portId }),
+    });
+    // update local state
+    const idx = allDevices.findIndex(d => d.id === deviceId);
+    if (idx >= 0) allDevices[idx] = updated;
+    // also refresh allPorts so other cards show the updated assignment
+    await loadAllPorts();
+    applyFilter();
+    if (currentTab === 'topology') loadTopology();
+  } catch (e) {
+    console.error('assignDevicePort:', e);
+    applyFilter(); // revert select
+  }
+}
+
 // ── name editing ─────────────────────────────────────────────────────────────
 
 function startEditName(deviceId, row) {
-  if (row.querySelector('input')) return; // already editing
+  if (row.querySelector('input')) return;
   const dev = allDevices.find(d => d.id === deviceId);
   const current = dev?.name || '';
 
@@ -203,12 +267,13 @@ function startEditName(deviceId, row) {
     saved = true;
     const name = input.value.trim() || null;
     try {
-      await apiFetch(`/api/devices/${deviceId}`, {
+      const updated = await apiFetch(`/api/devices/${deviceId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
       });
-      if (dev) dev.name = name;
+      const idx = allDevices.findIndex(d => d.id === deviceId);
+      if (idx >= 0) allDevices[idx] = updated;
     } catch (e) {
       console.error('Failed to save name:', e);
     }
@@ -268,8 +333,382 @@ function setScanRunning(running) {
 
 function startAutoRefresh() {
   setInterval(async () => {
-    await Promise.all([loadStats(), loadDevices()]);
+    await Promise.all([loadStats(), loadDevices(), loadAllPorts()]);
   }, 30_000);
+}
+
+// ── topology tab ──────────────────────────────────────────────────────────────
+
+let topoSimulation = null;
+
+async function loadTopologyTab() {
+  await Promise.all([loadSwitches(), loadTopology()]);
+}
+
+// ── switch management ─────────────────────────────────────────────────────────
+
+async function loadSwitches() {
+  try {
+    const switches = await apiFetch('/api/switches');
+    renderSwitches(switches);
+  } catch (e) { console.error('loadSwitches:', e); }
+}
+
+function renderSwitches(switches) {
+  const list = el('switches-list');
+  if (!switches.length) {
+    list.innerHTML = '<p class="empty-sw">No switches added yet.</p>';
+    return;
+  }
+  list.innerHTML = switches.map(sw => `
+    <div class="switch-row">
+      <div class="switch-info" onclick="openPortsModal(${sw.id})" style="cursor:pointer;flex:1">
+        <div>
+          <div class="switch-name">${esc(sw.name || sw.ip_address)}</div>
+          <div class="switch-meta">${sw.name ? esc(sw.ip_address) + ' · ' : ''}${sw.port_count} port${sw.port_count !== 1 ? 's' : ''}</div>
+        </div>
+      </div>
+      <button class="btn btn-sm btn-ghost" onclick="openPortsModal(${sw.id})" title="Manage ports">Ports</button>
+      <button class="btn-delete" onclick="deleteSwitch(${sw.id})" title="Remove switch">✕</button>
+    </div>`).join('');
+}
+
+function showAddSwitchForm() {
+  el('add-switch-form').classList.remove('hidden');
+  el('sw-ip').focus();
+}
+function hideAddSwitchForm() {
+  el('add-switch-form').classList.add('hidden');
+  el('sw-ip').value = '';
+  el('sw-name').value = '';
+  el('sw-form-error').textContent = '';
+}
+
+async function addSwitch() {
+  const ip = el('sw-ip').value.trim();
+  if (!ip) { el('sw-form-error').textContent = 'IP address is required.'; return; }
+  try {
+    await apiFetch('/api/switches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip_address: ip, name: el('sw-name').value.trim() || null }),
+    });
+    hideAddSwitchForm();
+    await loadSwitches();
+  } catch (e) {
+    el('sw-form-error').textContent = e.message || 'Failed to add switch.';
+  }
+}
+
+async function deleteSwitch(id) {
+  if (!confirm('Remove this switch and all its ports?')) return;
+  try {
+    await apiFetch(`/api/switches/${id}`, { method: 'DELETE' });
+    await Promise.all([loadSwitches(), loadAllPorts(), loadTopology()]);
+    applyFilter();
+  } catch (e) { console.error('deleteSwitch:', e); }
+}
+
+// ── ports modal ───────────────────────────────────────────────────────────────
+
+let _portsModalSwitchId = null;
+let _portsModalDevices  = [];
+
+async function openPortsModal(switchId) {
+  _portsModalSwitchId = switchId;
+  el('ports-modal').classList.remove('hidden');
+  el('ap-error').textContent = '';
+
+  // load switch info for header
+  const switches = await apiFetch('/api/switches');
+  const sw = switches.find(s => s.id === switchId);
+  if (sw) {
+    el('ports-modal-title').textContent = sw.name || sw.ip_address;
+    el('ports-modal-sub').textContent   = sw.name ? sw.ip_address : '';
+  }
+
+  // reset add-ports form — start from next available port number
+  await refreshPortsModal();
+}
+
+function closePortsModal() {
+  el('ports-modal').classList.add('hidden');
+  _portsModalSwitchId = null;
+}
+
+async function refreshPortsModal() {
+  if (!_portsModalSwitchId) return;
+
+  const [ports, devices] = await Promise.all([
+    apiFetch(`/api/switches/${_portsModalSwitchId}/ports`),
+    apiFetch('/api/devices'),
+  ]);
+  _portsModalDevices = devices;
+
+  const tbody = el('ports-tbody');
+  const empty = el('ports-empty');
+
+  if (!ports.length) {
+    tbody.innerHTML = '';
+    empty.classList.remove('hidden');
+  } else {
+    empty.classList.add('hidden');
+    tbody.innerHTML = ports.map(p => renderPortRow(p, devices)).join('');
+  }
+
+  // set default start port number for the add form
+  const nextNum = ports.length ? Math.max(...ports.map(p => p.port_number)) + 1 : 1;
+  el('ap-count').value = 1;
+}
+
+function renderPortRow(port, devices) {
+  const typeOpts = ['RJ45', 'SFP+'].map(t =>
+    `<option value="${t}" ${t === port.port_type ? 'selected' : ''}>${t}</option>`
+  ).join('');
+
+  const speedOpts = ['10M','100M','1G','2.5G','10G','25G','40G','100G'].map(s =>
+    `<option value="${s}" ${s === port.speed ? 'selected' : ''}>${s}</option>`
+  ).join('');
+
+  const devOpts = `<option value="">— none —</option>` +
+    devices.map(d => {
+      const label = d.name || d.hostname || d.ip_address;
+      const selected = d.id === port.device_id ? 'selected' : '';
+      return `<option value="${d.id}" ${selected}>${esc(label)}</option>`;
+    }).join('');
+
+  return `<tr data-port-id="${port.id}">
+    <td class="port-num">${port.port_number}</td>
+    <td><input type="text" class="port-label-input" value="${esc(port.label || '')}"
+      placeholder="label" onchange="savePortField(${port.id}, 'label', this.value)" /></td>
+    <td><select class="port-select" onchange="savePortField(${port.id}, 'port_type', this.value)">${typeOpts}</select></td>
+    <td><select class="port-select" onchange="savePortField(${port.id}, 'speed', this.value)">${speedOpts}</select></td>
+    <td><select class="port-select port-device-select" onchange="savePortDevice(${port.id}, this)">${devOpts}</select></td>
+    <td><button class="btn-delete" onclick="deletePort(${port.id})" title="Delete port">✕</button></td>
+  </tr>`;
+}
+
+async function savePortField(portId, field, value) {
+  try {
+    await apiFetch(`/api/switches/${_portsModalSwitchId}/ports/${portId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: value || null }),
+    });
+    await Promise.all([loadAllPorts(), loadSwitches()]);
+    if (currentTab === 'topology') loadTopology();
+    applyFilter();
+  } catch (e) {
+    console.error('savePortField:', e);
+  }
+}
+
+async function savePortDevice(portId, selectEl) {
+  const deviceId = selectEl.value ? parseInt(selectEl.value) : null;
+  try {
+    await apiFetch(`/api/switches/${_portsModalSwitchId}/ports/${portId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: deviceId }),
+    });
+    await Promise.all([loadAllPorts(), loadDevices(), loadSwitches()]);
+    if (currentTab === 'topology') loadTopology();
+    // re-render just the modal row without closing it
+    await refreshPortsModal();
+  } catch (e) {
+    console.error('savePortDevice:', e);
+    await refreshPortsModal();
+  }
+}
+
+async function deletePort(portId) {
+  try {
+    await apiFetch(`/api/switches/${_portsModalSwitchId}/ports/${portId}`, { method: 'DELETE' });
+    await Promise.all([loadAllPorts(), loadSwitches()]);
+    await refreshPortsModal();
+    if (currentTab === 'topology') loadTopology();
+    applyFilter();
+  } catch (e) { console.error('deletePort:', e); }
+}
+
+async function addPorts() {
+  const count  = parseInt(el('ap-count').value) || 1;
+  const type   = el('ap-type').value;
+  const speed  = el('ap-speed').value;
+  el('ap-error').textContent = '';
+
+  if (count < 1 || count > 96) {
+    el('ap-error').textContent = 'Count must be 1–96.';
+    return;
+  }
+
+  // figure out next port number
+  const existing = await apiFetch(`/api/switches/${_portsModalSwitchId}/ports`);
+  let nextNum = existing.length ? Math.max(...existing.map(p => p.port_number)) + 1 : 1;
+
+  for (let i = 0; i < count; i++) {
+    await apiFetch(`/api/switches/${_portsModalSwitchId}/ports`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port_number: nextNum + i, port_type: type, speed }),
+    });
+  }
+
+  await Promise.all([loadAllPorts(), loadSwitches()]);
+  await refreshPortsModal();
+  if (currentTab === 'topology') loadTopology();
+  applyFilter();
+}
+
+// ── topology graph ────────────────────────────────────────────────────────────
+
+async function loadTopology() {
+  try {
+    const data = await apiFetch('/api/topology');
+    renderTopology(data);
+  } catch (e) { console.error('loadTopology:', e); }
+}
+
+function renderTopology(data) {
+  const wrap  = el('topo-graph-wrap');
+  const svgEl = el('topo-svg');
+  const empty = el('topo-empty');
+
+  if (!data.nodes.length) {
+    empty.classList.remove('hidden');
+    svgEl.style.display = 'none';
+    return;
+  }
+  empty.classList.add('hidden');
+  svgEl.style.display = '';
+
+  const W = wrap.clientWidth  || 900;
+  const H = wrap.clientHeight || 600;
+
+  const svg = d3.select(svgEl).attr('width', W).attr('height', H);
+  svg.selectAll('*').remove();
+
+  const g = svg.append('g');
+  svg.call(
+    d3.zoom().scaleExtent([0.15, 4])
+      .on('zoom', ev => g.attr('transform', ev.transform))
+  );
+
+  const nodes = data.nodes.map(n => ({ ...n }));
+  const edges = data.edges.map(e => ({ ...e }));
+
+  // parallel edge offsets
+  const _pairCount = {}, _pairIdx = {};
+  edges.forEach(e => {
+    const k = [e.source, e.target].sort().join('|');
+    _pairCount[k] = (_pairCount[k] || 0) + 1;
+  });
+  edges.forEach(e => {
+    const k = [e.source, e.target].sort().join('|');
+    const idx = (_pairIdx[k] = (_pairIdx[k] || 0) + 1);
+    const total = _pairCount[k];
+    e.curveOffset = total === 1 ? 0 : (idx - (total + 1) / 2) * 44;
+  });
+
+  if (topoSimulation) topoSimulation.stop();
+  topoSimulation = d3.forceSimulation(nodes)
+    .force('link',      d3.forceLink(edges).id(d => d.id).distance(130))
+    .force('charge',    d3.forceManyBody().strength(d => d.type === 'switch' ? -600 : -250))
+    .force('center',    d3.forceCenter(W / 2, H / 2))
+    .force('collision', d3.forceCollide(42));
+
+  const edgeG = g.append('g').attr('class', 'topo-edges');
+  const edge = edgeG.selectAll('path').data(edges).join('path')
+    .attr('class', 'topo-edge topo-edge-port')
+    .on('mouseenter', (ev, d) => showEdgeTip(ev, d))
+    .on('mouseleave', hideEdgeTip);
+
+  const nodeG = g.append('g').attr('class', 'topo-nodes');
+  const node = nodeG.selectAll('g').data(nodes).join('g')
+    .attr('class', d => `topo-node topo-node-${d.type}`)
+    .call(d3.drag()
+      .on('start', (ev, d) => { if (!ev.active) topoSimulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on('drag',  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
+      .on('end',   (ev, d) => { if (!ev.active) topoSimulation.alphaTarget(0); d.fx = null; d.fy = null; })
+    )
+    .on('click', (ev, d) => { ev.stopPropagation(); showNodeDetail(d); });
+
+  node.filter(d => d.type === 'switch')
+    .append('rect').attr('width', 52).attr('height', 34).attr('x', -26).attr('y', -17).attr('rx', 5);
+
+  node.filter(d => d.type === 'device')
+    .append('circle').attr('r', 20);
+
+  node.append('text').attr('dy', d => d.type === 'switch' ? 28 : 33)
+    .text(d => _truncate(d.label, 16));
+
+  topoSimulation.on('tick', () => {
+    edge.attr('d', d => {
+      const sx = d.source.x, sy = d.source.y;
+      const tx = d.target.x, ty = d.target.y;
+      if (!d.curveOffset) return `M${sx},${sy}L${tx},${ty}`;
+      const dx = tx - sx, dy = ty - sy;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const mx = (sx + tx) / 2, my = (sy + ty) / 2;
+      return `M${sx},${sy}Q${mx + d.curveOffset * (-dy / len)},${my + d.curveOffset * (dx / len)},${tx},${ty}`;
+    });
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+
+  svg.on('click', closeNodeDetail);
+}
+
+// ── node detail panel ─────────────────────────────────────────────────────────
+
+function showNodeDetail(d) {
+  const panel = el('node-detail');
+  const body  = el('node-detail-body');
+
+  const rows = [];
+  if (d.ip)       rows.push(['IP',       d.ip]);
+  if (d.mac)      rows.push(['MAC',      d.mac]);
+  if (d.hostname) rows.push(['Hostname', d.hostname]);
+  if (d.vendor)   rows.push(['Vendor',   d.vendor]);
+  if (d.name && d.name !== d.label) rows.push(['Name', d.name]);
+
+  const online = d.is_online === true  ? '<span style="color:var(--green)">Online</span>'
+               : d.is_online === false ? '<span style="color:var(--muted)">Offline</span>'
+               : '';
+
+  body.innerHTML = `
+    <div class="nd-type">${d.type.replace('_', ' ')}</div>
+    <div class="nd-label">${esc(d.label)}</div>
+    ${online ? `<div class="nd-online">${online}</div>` : ''}
+    <dl class="nd-props">
+      ${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(String(v))}</dd>`).join('')}
+    </dl>`;
+
+  panel.classList.remove('hidden');
+}
+
+function closeNodeDetail() {
+  el('node-detail').classList.add('hidden');
+}
+
+// ── edge tooltip ──────────────────────────────────────────────────────────────
+
+let _edgeTip = null;
+
+function showEdgeTip(ev, d) {
+  if (!d.port) return;
+  if (!_edgeTip) {
+    _edgeTip = document.createElement('div');
+    _edgeTip.className = 'edge-tooltip';
+    document.body.appendChild(_edgeTip);
+  }
+  _edgeTip.textContent = `${d.port} · ${d.port_type} · ${d.speed}`;
+  _edgeTip.style.left = (ev.pageX + 12) + 'px';
+  _edgeTip.style.top  = (ev.pageY - 8)  + 'px';
+  _edgeTip.style.display = 'block';
+}
+
+function hideEdgeTip() {
+  if (_edgeTip) _edgeTip.style.display = 'none';
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -304,324 +743,6 @@ function fmt(date) {
     month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
-}
-
-// ── topology tab ──────────────────────────────────────────────────────────────
-
-let topoSimulation = null;
-let topoPollTimer  = null;
-
-async function loadTopologyTab() {
-  await Promise.all([loadSwitches(), loadTopology()]);
-}
-
-// ── switch management ─────────────────────────────────────────────────────────
-
-async function loadSwitches() {
-  try {
-    const switches = await apiFetch('/api/switches');
-    renderSwitches(switches);
-  } catch (e) { console.error('loadSwitches:', e); }
-}
-
-function renderSwitches(switches) {
-  const list = el('switches-list');
-  if (!switches.length) {
-    list.innerHTML = '<p class="empty-sw">No switches added yet.</p>';
-    return;
-  }
-  list.innerHTML = switches.map(sw => `
-    <div class="switch-row">
-      <div class="switch-info">
-        <span class="switch-status-dot ${sw.status}"></span>
-        <div>
-          <div class="switch-name">${esc(sw.name || sw.ip_address)}</div>
-          <div class="switch-meta">${sw.name ? esc(sw.ip_address) + ' · ' : ''}community: ${esc(sw.community)}
-            ${sw.last_polled ? ' · polled ' + timeAgo(new Date(sw.last_polled + 'Z')) : ''}
-          </div>
-        </div>
-      </div>
-      <button class="btn-delete" onclick="deleteSwitch(${sw.id})" title="Remove switch">✕</button>
-    </div>`).join('');
-}
-
-function showAddSwitchForm() {
-  el('add-switch-form').classList.remove('hidden');
-  el('sw-ip').focus();
-}
-function hideAddSwitchForm() {
-  el('add-switch-form').classList.add('hidden');
-  el('sw-ip').value = '';
-  el('sw-name').value = '';
-  el('sw-community').value = '';
-  el('sw-form-error').textContent = '';
-}
-
-async function addSwitch() {
-  const ip = el('sw-ip').value.trim();
-  if (!ip) { el('sw-form-error').textContent = 'IP address is required.'; return; }
-  try {
-    await apiFetch('/api/switches', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ip_address: ip,
-        name: el('sw-name').value.trim() || null,
-        community: el('sw-community').value.trim() || 'public',
-      }),
-    });
-    hideAddSwitchForm();
-    await loadSwitches();
-  } catch (e) {
-    el('sw-form-error').textContent = e.message || 'Failed to add switch.';
-  }
-}
-
-async function deleteSwitch(id) {
-  if (!confirm('Remove this switch and its topology data?')) return;
-  try {
-    await apiFetch(`/api/switches/${id}`, { method: 'DELETE' });
-    await loadSwitches();
-    await loadTopology();
-  } catch (e) { console.error('deleteSwitch:', e); }
-}
-
-// ── topology scan trigger ─────────────────────────────────────────────────────
-
-async function triggerTopoScan() {
-  el('topo-scan-btn').disabled = true;
-  try {
-    await apiFetch('/api/topology/scan', { method: 'POST' });
-    setTopoScanning(true);
-    openTopoLog();
-    pollTopoScan();
-  } catch (e) {
-    el('topo-scan-btn').disabled = false;
-  }
-}
-
-function pollTopoScan() {
-  clearTimeout(topoPollTimer);
-  topoPollTimer = setTimeout(async () => {
-    const status = await apiFetch('/api/topology/status');
-    if (status.running) {
-      pollTopoScan();
-    } else {
-      setTopoScanning(false);
-      await Promise.all([loadSwitches(), loadTopology()]);
-    }
-  }, 3000);
-}
-
-function setTopoScanning(running) {
-  const btn = el('topo-scan-btn');
-  btn.disabled = running;
-  btn.textContent = running ? 'Scanning…' : 'Scan Topology';
-  el('topo-banner').classList.toggle('hidden', !running);
-}
-
-// ── topology log modal ────────────────────────────────────────────────────────
-
-let _logPollTimer = null;
-
-function openTopoLog() {
-  el('topo-log-modal').classList.remove('hidden');
-  refreshTopoLog();
-}
-
-function closeTopoLog() {
-  el('topo-log-modal').classList.add('hidden');
-  clearTimeout(_logPollTimer);
-  _logPollTimer = null;
-}
-
-async function refreshTopoLog() {
-  clearTimeout(_logPollTimer);
-  try {
-    const data = await apiFetch('/api/topology/log');
-    const pre  = el('topo-log-pre');
-    const badge = el('topo-log-status');
-    const atBottom = pre.scrollHeight - pre.scrollTop <= pre.clientHeight + 40;
-
-    pre.textContent = data.lines.length
-      ? data.lines.join('\n')
-      : '— no log yet —';
-
-    badge.textContent = data.running ? 'running' : 'done';
-    badge.className   = 'badge ' + (data.running ? 'badge-running' : 'badge-done');
-
-    if (atBottom) pre.scrollTop = pre.scrollHeight;
-
-    if (data.running) {
-      _logPollTimer = setTimeout(refreshTopoLog, 1000);
-    }
-  } catch (e) {
-    _logPollTimer = setTimeout(refreshTopoLog, 2000);
-  }
-}
-
-// ── topology graph ────────────────────────────────────────────────────────────
-
-async function loadTopology() {
-  try {
-    const data = await apiFetch('/api/topology');
-    renderTopology(data);
-  } catch (e) { console.error('loadTopology:', e); }
-}
-
-function renderTopology(data) {
-  const wrap = el('topo-graph-wrap');
-  const svgEl = el('topo-svg');
-  const empty = el('topo-empty');
-
-  if (!data.nodes.length) {
-    empty.classList.remove('hidden');
-    svgEl.style.display = 'none';
-    return;
-  }
-  empty.classList.add('hidden');
-  svgEl.style.display = '';
-
-  const W = wrap.clientWidth  || 900;
-  const H = wrap.clientHeight || 600;
-
-  const svg = d3.select(svgEl).attr('width', W).attr('height', H);
-  svg.selectAll('*').remove();
-
-  // zoom
-  const g = svg.append('g');
-  svg.call(
-    d3.zoom().scaleExtent([0.15, 4])
-      .on('zoom', ev => g.attr('transform', ev.transform))
-  );
-
-  // deep-copy nodes/edges so D3 can mutate x/y
-  const nodes = data.nodes.map(n => ({ ...n }));
-  const edges = data.edges.map(e => ({ ...e }));
-
-  // assign curve offsets to parallel edges so they don't overlap
-  const _pairCount = {}, _pairIdx = {};
-  edges.forEach(e => {
-    const k = [e.source, e.target].sort().join('|');
-    _pairCount[k] = (_pairCount[k] || 0) + 1;
-  });
-  edges.forEach(e => {
-    const k = [e.source, e.target].sort().join('|');
-    const idx = (_pairIdx[k] = (_pairIdx[k] || 0) + 1);
-    const total = _pairCount[k];
-    e.curveOffset = total === 1 ? 0 : (idx - (total + 1) / 2) * 44;
-  });
-
-  // ── simulation ──
-  if (topoSimulation) topoSimulation.stop();
-  topoSimulation = d3.forceSimulation(nodes)
-    .force('link',      d3.forceLink(edges).id(d => d.id).distance(d => d.type === 'lldp' ? 180 : 110))
-    .force('charge',    d3.forceManyBody().strength(d => d.type === 'switch' ? -600 : -250))
-    .force('center',    d3.forceCenter(W / 2, H / 2))
-    .force('collision', d3.forceCollide(42));
-
-  // ── edges ──
-  const edgeG = g.append('g').attr('class', 'topo-edges');
-  const edge = edgeG.selectAll('path').data(edges).join('path')
-    .attr('class', d => `topo-edge topo-edge-${d.type}`)
-    .on('mouseenter', (ev, d) => showEdgeTip(ev, d))
-    .on('mouseleave', hideEdgeTip);
-
-  // ── nodes ──
-  const nodeG = g.append('g').attr('class', 'topo-nodes');
-  const node = nodeG.selectAll('g').data(nodes).join('g')
-    .attr('class', d => `topo-node topo-node-${d.type}`)
-    .call(d3.drag()
-      .on('start', (ev, d) => { if (!ev.active) topoSimulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-      .on('drag',  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
-      .on('end',   (ev, d) => { if (!ev.active) topoSimulation.alphaTarget(0); d.fx = null; d.fy = null; })
-    )
-    .on('click', (ev, d) => { ev.stopPropagation(); showNodeDetail(d); });
-
-  // shapes
-  node.filter(d => d.type === 'switch' || d.type === 'external_switch')
-    .append('rect').attr('width', 52).attr('height', 34).attr('x', -26).attr('y', -17).attr('rx', 5);
-
-  node.filter(d => d.type !== 'switch' && d.type !== 'external_switch')
-    .append('circle').attr('r', 20);
-
-  // labels
-  node.append('text').attr('dy', d =>
-    (d.type === 'switch' || d.type === 'external_switch') ? 28 : 33
-  ).text(d => _truncate(d.label, 16));
-
-  // tick
-  topoSimulation.on('tick', () => {
-    edge.attr('d', d => {
-      const sx = d.source.x, sy = d.source.y;
-      const tx = d.target.x, ty = d.target.y;
-      if (!d.curveOffset) return `M${sx},${sy}L${tx},${ty}`;
-      const dx = tx - sx, dy = ty - sy;
-      const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      const mx = (sx + tx) / 2, my = (sy + ty) / 2;
-      return `M${sx},${sy}Q${mx + d.curveOffset * (-dy / len)},${my + d.curveOffset * (dx / len)},${tx},${ty}`;
-    });
-    node.attr('transform', d => `translate(${d.x},${d.y})`);
-  });
-
-  // click on background closes detail
-  svg.on('click', closeNodeDetail);
-}
-
-// ── node detail panel ─────────────────────────────────────────────────────────
-
-function showNodeDetail(d) {
-  const panel = el('node-detail');
-  const body  = el('node-detail-body');
-
-  const rows = [];
-  if (d.ip)       rows.push(['IP',       d.ip]);
-  if (d.mac)      rows.push(['MAC',      d.mac]);
-  if (d.hostname) rows.push(['Hostname', d.hostname]);
-  if (d.vendor)   rows.push(['Vendor',   d.vendor]);
-  if (d.name && d.name !== d.label) rows.push(['Name', d.name]);
-  if (d.status)   rows.push(['SNMP status', d.status]);
-  if (d.last_polled) rows.push(['Last polled', timeAgo(new Date(d.last_polled + 'Z'))]);
-  if (d.sysname)  rows.push(['Sysname',  d.sysname]);
-
-  const online = d.is_online === true ? '<span style="color:var(--green)">Online</span>'
-               : d.is_online === false ? '<span style="color:var(--muted)">Offline</span>'
-               : '';
-
-  body.innerHTML = `
-    <div class="nd-type">${d.type.replace('_', ' ')}</div>
-    <div class="nd-label">${esc(d.label)}</div>
-    ${online ? `<div class="nd-online">${online}</div>` : ''}
-    <dl class="nd-props">
-      ${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(String(v))}</dd>`).join('')}
-    </dl>`;
-
-  panel.classList.remove('hidden');
-}
-
-function closeNodeDetail() {
-  el('node-detail').classList.add('hidden');
-}
-
-// ── edge tooltip ──────────────────────────────────────────────────────────────
-
-let _edgeTip = null;
-
-function showEdgeTip(ev, d) {
-  if (!d.port) return;
-  if (!_edgeTip) {
-    _edgeTip = document.createElement('div');
-    _edgeTip.className = 'edge-tooltip';
-    document.body.appendChild(_edgeTip);
-  }
-  _edgeTip.textContent = d.port;
-  _edgeTip.style.left = (ev.pageX + 12) + 'px';
-  _edgeTip.style.top  = (ev.pageY - 8)  + 'px';
-  _edgeTip.style.display = 'block';
-}
-
-function hideEdgeTip() {
-  if (_edgeTip) _edgeTip.style.display = 'none';
 }
 
 function _truncate(s, n) {
