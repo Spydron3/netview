@@ -66,16 +66,20 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                     )
                 """))
                 # copy existing assignments if the old column still exists
+                # (DO block defers inner SQL parsing so a missing column is safe)
                 conn.execute(text("""
-                    INSERT INTO port_connections (switch_port_id, device_id)
-                    SELECT sp.id, sp.device_id
-                    FROM switch_ports sp
-                    WHERE sp.device_id IS NOT NULL
-                      AND EXISTS (
-                          SELECT 1 FROM information_schema.columns
-                          WHERE table_name='switch_ports' AND column_name='device_id'
-                      )
-                    ON CONFLICT (switch_port_id) DO NOTHING
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name='switch_ports' AND column_name='device_id'
+                        ) THEN
+                            INSERT INTO port_connections (switch_port_id, device_id)
+                            SELECT id, device_id FROM switch_ports
+                            WHERE device_id IS NOT NULL
+                            ON CONFLICT (switch_port_id) DO NOTHING;
+                        END IF;
+                    END $$
                 """))
                 conn.execute(text(
                     "ALTER TABLE switch_ports DROP COLUMN IF EXISTS device_id"
