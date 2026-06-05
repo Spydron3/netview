@@ -47,6 +47,31 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                     ))
                 # drop legacy topology_links table
                 conn.execute(text("DROP TABLE IF EXISTS topology_links"))
+                # migrate switch_ports.device_id → port_connections (M:N table)
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS port_connections (
+                        id             SERIAL PRIMARY KEY,
+                        switch_port_id INTEGER NOT NULL UNIQUE
+                            REFERENCES switch_ports(id) ON DELETE CASCADE,
+                        device_id      INTEGER NOT NULL
+                            REFERENCES devices(id) ON DELETE CASCADE
+                    )
+                """))
+                # copy existing assignments if the old column still exists
+                conn.execute(text("""
+                    INSERT INTO port_connections (switch_port_id, device_id)
+                    SELECT sp.id, sp.device_id
+                    FROM switch_ports sp
+                    WHERE sp.device_id IS NOT NULL
+                      AND EXISTS (
+                          SELECT 1 FROM information_schema.columns
+                          WHERE table_name='switch_ports' AND column_name='device_id'
+                      )
+                    ON CONFLICT (switch_port_id) DO NOTHING
+                """))
+                conn.execute(text(
+                    "ALTER TABLE switch_ports DROP COLUMN IF EXISTS device_id"
+                ))
                 # seed default settings from env vars on first run
                 defaults = {
                     "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),

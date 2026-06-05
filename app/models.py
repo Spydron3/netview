@@ -46,8 +46,15 @@ class SwitchPort(Base):
     port_number = Column(Integer, nullable=False)
     label = Column(String(100), nullable=True)
     port_type = Column(String(10), nullable=False, default="RJ45")  # RJ45 | SFP+
-    speed = Column(String(10), nullable=False, default="1G")        # 100M | 1G | 10G | 25G | 40G | 100G
-    device_id = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True)
+    speed = Column(String(10), nullable=False, default="1G")
+
+
+class PortConnection(Base):
+    __tablename__ = "port_connections"
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    switch_port_id = Column(Integer, ForeignKey("switch_ports.id", ondelete="CASCADE"), nullable=False, unique=True)
+    device_id      = Column(Integer, ForeignKey("devices.id",      ondelete="CASCADE"), nullable=False)
 
 
 class SwitchLink(Base):

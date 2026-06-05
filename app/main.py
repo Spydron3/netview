@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from database import get_db, get_setting, init_db, set_setting
-from models import Device, ScanRun, Setting, Switch, SwitchLink, SwitchPort
+from models import Device, PortConnection, ScanRun, Setting, Switch, SwitchLink, SwitchPort
 from scanner import get_network_range, scan_network
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -174,8 +174,9 @@ def api_stats():
 def _device_ports(db, device_id: int) -> list:
     return db.execute(
         sa.select(SwitchPort, Switch)
+        .join(PortConnection, PortConnection.switch_port_id == SwitchPort.id)
         .join(Switch, Switch.id == SwitchPort.switch_id)
-        .where(SwitchPort.device_id == device_id)
+        .where(PortConnection.device_id == device_id)
         .order_by(Switch.ip_address, SwitchPort.port_number)
     ).all()
 
@@ -186,7 +187,8 @@ def api_devices():
         from sqlalchemy.dialects.postgresql import INET
         rows = db.execute(
             sa.select(Device, SwitchPort, Switch)
-            .outerjoin(SwitchPort, SwitchPort.device_id == Device.id)
+            .outerjoin(PortConnection, PortConnection.device_id == Device.id)
+            .outerjoin(SwitchPort, SwitchPort.id == PortConnection.switch_port_id)
             .outerjoin(Switch, Switch.id == SwitchPort.switch_id)
             .order_by(Device.is_online.desc(), sa.cast(Device.ip_address, INET))
         ).all()
@@ -239,7 +241,13 @@ def api_add_device_port(device_id: int, body: DevicePortAssign):
         port = db.get(SwitchPort, body.switch_port_id)
         if not port:
             raise HTTPException(status_code=404, detail="Port not found")
-        port.device_id = device_id  # port is exclusive; previous device loses it
+        existing = db.execute(
+            sa.select(PortConnection).where(PortConnection.switch_port_id == body.switch_port_id)
+        ).scalar_one_or_none()
+        if existing:
+            existing.device_id = device_id
+        else:
+            db.add(PortConnection(switch_port_id=body.switch_port_id, device_id=device_id))
         db.flush()
         return _device_to_dict(device, _device_ports(db, device_id))
 
@@ -247,10 +255,15 @@ def api_add_device_port(device_id: int, body: DevicePortAssign):
 @app.delete("/api/devices/{device_id}/ports/{port_id}", status_code=204)
 def api_remove_device_port(device_id: int, port_id: int):
     with get_db() as db:
-        port = db.get(SwitchPort, port_id)
-        if not port or port.device_id != device_id:
+        conn = db.execute(
+            sa.select(PortConnection).where(
+                PortConnection.switch_port_id == port_id,
+                PortConnection.device_id == device_id,
+            )
+        ).scalar_one_or_none()
+        if not conn:
             raise HTTPException(status_code=404, detail="Port assignment not found")
-        port.device_id = None
+        db.delete(conn)
 
 
 # ── settings ──────────────────────────────────────────────────────────────────
@@ -379,7 +392,6 @@ class PortCreate(BaseModel):
     port_type: str = "RJ45"
     speed: str = "1G"
     label: str | None = None
-    device_id: int | None = None
 
 
 class PortUpdate(BaseModel):
@@ -397,7 +409,8 @@ def api_list_ports(switch_id: int):
             raise HTTPException(status_code=404, detail="Switch not found")
         rows = db.execute(
             sa.select(SwitchPort, Device)
-            .outerjoin(Device, Device.id == SwitchPort.device_id)
+            .outerjoin(PortConnection, PortConnection.switch_port_id == SwitchPort.id)
+            .outerjoin(Device, Device.id == PortConnection.device_id)
             .where(SwitchPort.switch_id == switch_id)
             .order_by(SwitchPort.port_number)
         ).all()
@@ -420,12 +433,10 @@ def api_add_port(switch_id: int, body: PortCreate):
             port_type=body.port_type,
             speed=body.speed,
             label=body.label,
-            device_id=body.device_id,
         )
         db.add(port)
         db.flush()
-        dev = db.get(Device, port.device_id) if port.device_id else None
-        return _port_to_dict(port, sw, dev)
+        return _port_to_dict(port, sw, None)
 
 
 @app.patch("/api/switches/{switch_id}/ports/{port_id}")
@@ -451,10 +462,23 @@ def api_update_port(switch_id: int, port_id: int, body: PortUpdate):
         if "label" in fields:
             port.label = body.label
         if "device_id" in fields:
-            port.device_id = body.device_id
+            conn = db.execute(
+                sa.select(PortConnection).where(PortConnection.switch_port_id == port_id)
+            ).scalar_one_or_none()
+            if body.device_id is None:
+                if conn:
+                    db.delete(conn)
+            else:
+                if conn:
+                    conn.device_id = body.device_id
+                else:
+                    db.add(PortConnection(switch_port_id=port_id, device_id=body.device_id))
 
         db.flush()
-        dev = db.get(Device, port.device_id) if port.device_id else None
+        conn = db.execute(
+            sa.select(PortConnection).where(PortConnection.switch_port_id == port_id)
+        ).scalar_one_or_none()
+        dev = db.get(Device, conn.device_id) if conn else None
         return _port_to_dict(port, sw, dev)
 
 
@@ -475,7 +499,8 @@ def api_all_ports():
         rows = db.execute(
             sa.select(SwitchPort, Switch, Device)
             .join(Switch, Switch.id == SwitchPort.switch_id)
-            .outerjoin(Device, Device.id == SwitchPort.device_id)
+            .outerjoin(PortConnection, PortConnection.switch_port_id == SwitchPort.id)
+            .outerjoin(Device, Device.id == PortConnection.device_id)
             .order_by(Switch.ip_address, SwitchPort.port_number)
         ).all()
         return [_port_to_dict(p, s, d) for p, s, d in rows]
@@ -545,7 +570,8 @@ def api_topology():
 
         ports_with_devices = db.execute(
             sa.select(SwitchPort, Device)
-            .join(Device, Device.id == SwitchPort.device_id)
+            .join(PortConnection, PortConnection.switch_port_id == SwitchPort.id)
+            .join(Device, Device.id == PortConnection.device_id)
         ).all()
 
         sw_links = db.execute(sa.select(SwitchLink)).scalars().all()
@@ -563,8 +589,15 @@ def api_topology():
         edges: list[dict] = []
         seen: set[str] = set()
 
-        # IP → switch map so devices that are also switches don't appear twice
-        sw_by_ip = {sw.ip_address: sw for sw in switches}
+        # Match devices → switches by IP and MAC to avoid duplicate nodes
+        sw_by_ip: dict[str, Switch] = {sw.ip_address: sw for sw in switches}
+        sw_by_mac: dict[str, Switch] = {}
+        for sw in switches:
+            dev_row = db.execute(
+                sa.select(Device).where(Device.ip_address == sw.ip_address)
+            ).scalar_one_or_none()
+            if dev_row and dev_row.mac_address:
+                sw_by_mac[dev_row.mac_address.lower()] = sw
 
         for sw in switches:
             nid = f"sw_{sw.id}"
@@ -580,11 +613,15 @@ def api_topology():
             if src not in seen:
                 continue
 
-            # if this device's IP matches a configured switch, link to that switch
-            # node directly — avoids a duplicate device circle for managed switches
-            matched_sw = sw_by_ip.get(dev.ip_address)
-            if matched_sw and matched_sw.id != port.switch_id:
+            # Collapse device into its switch node when matched by IP or MAC
+            matched_sw = (
+                sw_by_ip.get(dev.ip_address)
+                or sw_by_mac.get((dev.mac_address or "").lower())
+            )
+            if matched_sw:
                 tgt = f"sw_{matched_sw.id}"
+                if src == tgt:
+                    continue  # skip self-loop (switch connected to its own mgmt port)
             else:
                 tgt = f"dev_{dev.id}"
                 if tgt not in seen:
@@ -647,7 +684,7 @@ def _port_to_dict(p: SwitchPort, sw: Switch, dev: Device | None) -> dict:
         "label": p.label,
         "port_type": p.port_type,
         "speed": p.speed,
-        "device_id": p.device_id,
+        "device_id": dev.id if dev else None,
         "device_label": (dev.name or dev.hostname or dev.ip_address) if dev else None,
     }
 
