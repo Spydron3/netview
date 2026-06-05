@@ -47,7 +47,7 @@ async function openSettings() {
 }
 
 function toggleSmtpFields() {
-  el('smtp-fields').style.display = el('s-notify-new').checked ? '' : 'none';
+  el('smtp-fields').style.display = el('s-notify-new').checked ? 'block' : 'none';
 }
 
 function closeSettings() {
@@ -911,8 +911,9 @@ function renderTopology(data) {
     .force('center',    d3.forceCenter(W / 2, H / 2))
     .force('collision', d3.forceCollide(d => {
         if (d.type === 'device' && (d.virtual_children || []).length > 0) {
-          const w = Math.max(70, 20 + d.virtual_children.length * 30);
-          return w / 2 + 16;
+          const rowH = 22;
+          const h = 14 + d.virtual_children.length * rowH;
+          return h / 2 + 16;
         }
         return 46;
       }));
@@ -952,37 +953,39 @@ function renderTopology(data) {
     .attr('class', 'wifi-arc')
     .attr('d', 'M-9,-16 A15,15 0 0,1 9,-16 M-5,-20 A10,10 0 0,1 5,-20 M-1,-24 A5,5 0 0,1 1,-24');
 
-  // VM host nodes: rounded rect containing child circles
+  // VM host nodes: rounded rect with a vertical list of child VMs
   node.filter(d => d.type === 'device' && (d.virtual_children || []).length > 0)
     .each(function(d) {
-      const n       = d.virtual_children.length;
-      const spacing = 30;
-      const w       = Math.max(70, 20 + n * spacing);
-      const h       = 62;
-      const g2      = d3.select(this);
+      const n    = d.virtual_children.length;
+      const rowH = 22;
+      const w    = 134;
+      const h    = 10 + n * rowH + 4;
+      const g2   = d3.select(this);
+      d._vmH = h;
       g2.append('rect')
         .attr('width', w).attr('height', h)
         .attr('x', -w / 2).attr('y', -h / 2)
         .attr('rx', 6).attr('class', 'vmhost-rect');
-      const startX = -(n - 1) * spacing / 2;
       d.virtual_children.forEach((child, i) => {
-        const cx  = startX + i * spacing;
-        const cg  = g2.append('g').attr('transform', `translate(${cx},0)`);
+        const cy = -h / 2 + 10 + i * rowH + rowH / 2;
+        const cg = g2.append('g').attr('transform', `translate(0,${cy})`);
         cg.append('circle')
-          .attr('r', 8)
+          .attr('cx', -w / 2 + 14).attr('r', 6)
           .attr('class', `vmchild-dot ${child.is_online ? 'vm-on' : 'vm-off'}`);
         cg.append('text')
-          .attr('dy', 20).attr('text-anchor', 'middle')
+          .attr('x', -w / 2 + 26).attr('dy', '0.35em')
+          .attr('text-anchor', 'start')
           .attr('class', 'vmchild-label')
-          .text(_truncate(child.label, 6));
+          .text(_truncate(child.label, 14));
       });
     });
 
   node.append('text').attr('dy', d => {
       if (d.type === 'switch') return 28;
       if ((d.virtual_children || []).length > 0) {
-        const h = 62;
-        return h / 2 + 14;  // below the rect
+        const rowH = 22;
+        const h = 10 + d.virtual_children.length * rowH + 4;
+        return h / 2 + 14;
       }
       return 33;
     })
