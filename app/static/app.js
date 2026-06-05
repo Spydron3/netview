@@ -2,13 +2,15 @@
 
 let allDevices = [];
 let allPorts   = [];   // flat list from GET /api/ports — used for device dropdowns
+let allRooms   = [];
 let pollTimer  = null;
 let currentTab = 'devices';
 
 // ── bootstrap ─────────────────────────────────────────────────────────────────
 
 (async function init() {
-  await Promise.all([loadStats(), loadDevices(), loadHistory(), loadAllPorts()]);
+  await Promise.all([loadRooms(), loadStats(), loadHistory(), loadAllPorts()]);
+  await loadDevices();
   startAutoRefresh();
 })();
 
@@ -146,6 +148,14 @@ async function loadAllPorts() {
   }
 }
 
+async function loadRooms() {
+  try {
+    allRooms = await apiFetch('/api/rooms');
+  } catch (e) {
+    console.error('loadRooms:', e);
+  }
+}
+
 async function loadHistory() {
   try {
     const rows = await apiFetch('/api/scan/history');
@@ -249,9 +259,15 @@ function renderDevices(devices) {
       <button class="btn btn-sm btn-ghost" onclick="openPortsModal(${d.id})" style="margin:4px 0 0">Manage Ports</button>
       ` : ''}
       <div class="device-room-row">
-        <input type="text" class="room-input" value="${esc(d.room || '')}"
-          placeholder="Room…"
-          onchange="setDeviceRoom(${d.id}, this.value)" />
+        <select class="room-select" onchange="onRoomSelect(${d.id}, this)">
+          <option value="">— no room —</option>
+          ${allRooms.map(r => `<option value="${r.id}" ${r.id === d.room_id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
+          <option value="__new__">＋ New room…</option>
+        </select>
+        <input type="text" class="room-new-input" style="display:none"
+          placeholder="Room name…" data-device-id="${d.id}"
+          onkeydown="onNewRoomKey(${d.id}, this, event)"
+          onblur="cancelNewRoom(this)" />
       </div>
       <div class="device-footer">
         ${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
@@ -303,17 +319,64 @@ async function setVirtualParent(deviceId, parentIdStr) {
   await loadDevices();
 }
 
-async function setDeviceRoom(deviceId, room) {
+async function onRoomSelect(deviceId, sel) {
+  if (sel.value === '__new__') {
+    const input = sel.nextElementSibling;
+    sel.style.display = 'none';
+    input.style.display = '';
+    input.focus();
+    return;
+  }
+  await setDeviceRoomById(deviceId, sel.value ? parseInt(sel.value) : null);
+}
+
+async function onNewRoomKey(deviceId, input, event) {
+  if (event.key === 'Escape') { cancelNewRoom(input); return; }
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  const name = input.value.trim();
+  if (!name) { cancelNewRoom(input); return; }
+  try {
+    const room = await apiFetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    await loadRooms();
+    await setDeviceRoomById(deviceId, room.id);
+  } catch (e) {
+    console.error('onNewRoomKey:', e);
+    cancelNewRoom(input);
+  }
+}
+
+function cancelNewRoom(input) {
+  input.style.display = 'none';
+  input.value = '';
+  const sel = input.previousElementSibling;
+  if (sel) {
+    const devId = parseInt(input.dataset.deviceId);
+    const dev = allDevices.find(d => d.id === devId);
+    sel.value = dev?.room_id != null ? String(dev.room_id) : '';
+    sel.style.display = '';
+  }
+}
+
+async function setDeviceRoomById(deviceId, roomId) {
   try {
     await apiFetch(`/api/devices/${deviceId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ room: room.trim() || null }),
+      body: JSON.stringify({ room_id: roomId }),
     });
     const idx = allDevices.findIndex(d => d.id === deviceId);
-    if (idx >= 0) allDevices[idx].room = room.trim() || null;
+    if (idx >= 0) {
+      allDevices[idx].room_id = roomId;
+      allDevices[idx].room = allRooms.find(r => r.id === roomId)?.name || null;
+    }
     if (currentTab === 'topology') loadTopology();
-  } catch (e) { console.error('setDeviceRoom:', e); }
+    renderDevices(allDevices);
+  } catch (e) { console.error('setDeviceRoomById:', e); }
 }
 
 // ── device ports modal ───────────────────────────────────────────────────────

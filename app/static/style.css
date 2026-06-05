@@ -915,7 +915,8 @@ tr:hover td { background: var(--surface2); }
   min-width: 0;
 }
 .device-room-row { margin-top: 5px; }
-.room-input {
+.room-select,
+.room-new-input {
   width: 100%;
   box-sizing: border-box;
   font-size: 11px;
@@ -926,7 +927,8 @@ tr:hover td { background: var(--surface2); }
   border: 1px solid var(--border);
   font-family: var(--font);
 }
-.room-input:focus { color: var(--text); outline: none; border-color: var(--blue); }
+.room-select:focus,
+.room-new-input:focus { color: var(--text); outline: none; border-color: var(--blue); }
 .device-wifi-badge {
   background: color-mix(in srgb, var(--cyan, #22d3ee) 15%, transparent);
   color: var(--cyan, #22d3ee);

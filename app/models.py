@@ -5,6 +5,12 @@ from sqlalchemy.orm import declarative_base
 Base = declarative_base()
 
 
+class Room(Base):
+    __tablename__ = "rooms"
+    id   = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True)
+
+
 class Device(Base):
     __tablename__ = "devices"
 
@@ -25,7 +31,7 @@ class Device(Base):
     is_virtual  = Column(Boolean, default=False, nullable=False, server_default="false")
     parent_id   = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True)
     is_wireless = Column(Boolean, default=False, nullable=False, server_default="false")
-    room        = Column(String(100), nullable=True)
+    room_id     = Column(Integer, ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)
 
 
 class Setting(Base):

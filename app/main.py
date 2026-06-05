@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from database import get_db, get_setting, init_db, set_setting
 from sqlalchemy.orm import aliased as _aliased
-from models import Device, DevicePort, PortLink, ScanRun, Setting, SwitchPort, TopologyPosition
+from models import Device, DevicePort, PortLink, Room, ScanRun, Setting, SwitchPort, TopologyPosition
 from scanner import get_network_range, scan_network
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -270,7 +270,8 @@ def api_devices():
         conns: dict[int, list] = {}
         for sp, sw, dp in conn_rows:
             conns.setdefault(dp.device_id, []).append((sp, sw, dp))
-        return [_device_to_dict(dev, conns.get(dev.id, [])) for dev in devices]
+        rooms = _rooms_dict(db)
+        return [_device_to_dict(dev, conns.get(dev.id, []), rooms) for dev in devices]
 
 
 @app.get("/api/devices/{device_id}")
@@ -279,7 +280,7 @@ def api_device(device_id: int):
         dev = db.get(Device, device_id)
         if not dev:
             raise HTTPException(status_code=404, detail="Device not found")
-        return _device_to_dict(dev, _device_ports(db, device_id))
+        return _device_to_dict(dev, _device_ports(db, device_id), _rooms_dict(db))
 
 
 class DeviceUpdate(BaseModel):
@@ -288,7 +289,7 @@ class DeviceUpdate(BaseModel):
     is_virtual: bool | None = None
     parent_id: int | None = None
     is_wireless: bool | None = None
-    room: str | None = None
+    room_id: int | None = None
 
 
 @app.patch("/api/devices/{device_id}")
@@ -317,10 +318,11 @@ def api_update_device(device_id: int, body: DeviceUpdate):
                 if body.parent_id == device_id:
                     raise HTTPException(status_code=422, detail="Device cannot be its own parent")
             d.parent_id = body.parent_id
-        if "room" in body.model_fields_set:
-            d.room = body.room.strip() if body.room and body.room.strip() else None
+        if "room_id" in body.model_fields_set:
+            d.room_id = body.room_id
         db.flush()
-        return _device_to_dict(d, _device_ports(db, device_id))
+        rooms = _rooms_dict(db)
+        return _device_to_dict(d, _device_ports(db, device_id), rooms)
 
 
 # ── device ports (interfaces) ─────────────────────────────────────────────────
@@ -387,7 +389,7 @@ def api_connect_device_port(device_id: int, body: DeviceConnectionCreate):
             raise HTTPException(status_code=409, detail="Device interface already connected")
         db.add(PortLink(port_a_id=body.switch_port_id, dev_port_id=body.dev_port_id))
         db.flush()
-        return _device_to_dict(db.get(Device, device_id), _device_ports(db, device_id))
+        return _device_to_dict(db.get(Device, device_id), _device_ports(db, device_id), _rooms_dict(db))
 
 
 @app.delete("/api/devices/{device_id}/ports/{port_id}", status_code=204)
@@ -405,6 +407,44 @@ def api_disconnect_device_port(device_id: int, port_id: int):
         if not lnk:
             raise HTTPException(status_code=404, detail="Connection not found")
         db.delete(lnk)
+
+
+# ── rooms ─────────────────────────────────────────────────────────────────────
+
+@app.get("/api/rooms")
+def api_get_rooms():
+    with get_db() as db:
+        rooms = db.execute(sa.select(Room).order_by(Room.name)).scalars().all()
+        return [{"id": r.id, "name": r.name} for r in rooms]
+
+
+class RoomCreate(BaseModel):
+    name: str
+
+
+@app.post("/api/rooms", status_code=201)
+def api_create_room(body: RoomCreate):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Name required")
+    with get_db() as db:
+        existing = db.execute(
+            sa.select(Room).where(Room.name == name)
+        ).scalar_one_or_none()
+        if existing:
+            return {"id": existing.id, "name": existing.name}
+        r = Room(name=name)
+        db.add(r)
+        db.flush()
+        return {"id": r.id, "name": r.name}
+
+
+@app.delete("/api/rooms/{room_id}", status_code=204)
+def api_delete_room(room_id: int):
+    with get_db() as db:
+        r = db.get(Room, room_id)
+        if r:
+            db.delete(r)
 
 
 # ── unified port links ────────────────────────────────────────────────────────
@@ -971,6 +1011,7 @@ def api_topology():
             ).scalars().all():
                 ports_by_id[p.id] = p
 
+        rooms = _rooms_dict(db)
         sw_device_ids = {sw.id for sw in switch_devs}
         nodes: list[dict] = []
         edges: list[dict] = []
@@ -982,7 +1023,7 @@ def api_topology():
                 "id": nid, "type": "switch",
                 "label": _sw_label(sw),
                 "ip": sw.ip_address, "name": sw.name,
-                "room": sw.room,
+                "room": rooms.get(sw.room_id),
             })
             seen.add(nid)
 
@@ -1020,7 +1061,7 @@ def api_topology():
                         "hostname": dev.hostname, "vendor": dev.vendor,
                         "name": dev.name, "is_online": dev.is_online,
                         "is_wireless": dev.is_wireless,
-                        "room": dev.room,
+                        "room": rooms.get(dev.room_id),
                     })
                     seen.add(tgt)
                 edges.append({
@@ -1084,7 +1125,7 @@ def api_topology():
                         "hostname": _d.hostname, "vendor": _d.vendor,
                         "name": _d.name, "is_online": _d.is_online,
                         "is_wireless": _d.is_wireless,
-                        "room": _d.room,
+                        "room": rooms.get(_d.room_id),
                     })
                     seen.add(_nid)
             edges.append({"source": src, "target": tgt, "type": "device_link"})
@@ -1200,7 +1241,11 @@ def _port_to_dict(p: SwitchPort, sw: Device, dev: Device | None, link_id: int | 
     }
 
 
-def _device_to_dict(d: Device, ports: list | None = None) -> dict:
+def _rooms_dict(db) -> dict[int, str]:
+    return {r.id: r.name for r in db.execute(sa.select(Room)).scalars().all()}
+
+
+def _device_to_dict(d: Device, ports: list | None = None, rooms: dict | None = None) -> dict:
     return {
         "id": d.id,
         "ip_address": d.ip_address,
@@ -1219,7 +1264,8 @@ def _device_to_dict(d: Device, ports: list | None = None) -> dict:
         "is_virtual": d.is_virtual,
         "parent_id": d.parent_id,
         "is_wireless": d.is_wireless,
-        "room": d.room,
+        "room_id": d.room_id,
+        "room": rooms.get(d.room_id) if (rooms is not None and d.room_id) else None,
         "switch_ports": [
             {
                 "id": p.id,

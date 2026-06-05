@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 import models  # noqa: F401 – all subclasses must be imported before create_all
-from models import Base, Setting
+from models import Base, Room, Setting  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -218,9 +218,35 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                     "ALTER TABLE port_links ADD COLUMN IF NOT EXISTS "
                     "dev_port_id_b INTEGER UNIQUE REFERENCES device_ports(id) ON DELETE CASCADE"
                 ))
+                # rooms table is created by create_all; add FK to devices
                 conn.execute(text(
-                    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS room VARCHAR(100)"
+                    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS "
+                    "room_id INTEGER REFERENCES rooms(id) ON DELETE SET NULL"
                 ))
+                # migrate old room string column → room_id FK
+                conn.execute(text("""
+                    DO $$
+                    DECLARE
+                        _name TEXT;
+                        _rid  INTEGER;
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name='devices' AND column_name='room'
+                        ) THEN
+                            FOR _name IN
+                                SELECT DISTINCT room FROM devices
+                                WHERE room IS NOT NULL AND room <> ''
+                            LOOP
+                                INSERT INTO rooms (name) VALUES (_name)
+                                ON CONFLICT (name) DO NOTHING;
+                                SELECT id INTO _rid FROM rooms WHERE name = _name;
+                                UPDATE devices SET room_id = _rid WHERE room = _name;
+                            END LOOP;
+                            ALTER TABLE devices DROP COLUMN room;
+                        END IF;
+                    END $$
+                """))
                 # seed default settings from env vars on first run
                 defaults = {
                     "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),
