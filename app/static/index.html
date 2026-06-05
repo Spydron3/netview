@@ -278,6 +278,57 @@
   </div>
 </div>
 
+<!-- ── device ports modal ── -->
+<div id="device-ports-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-backdrop" onclick="closeDevicePortsModal()"></div>
+  <div class="modal-panel modal-panel-wide">
+    <div class="modal-header">
+      <div>
+        <h2 id="device-ports-modal-title">Device Connections</h2>
+        <div id="device-ports-modal-sub" class="modal-subtitle"></div>
+      </div>
+      <button class="modal-close" onclick="closeDevicePortsModal()">✕</button>
+    </div>
+    <div class="modal-body" style="padding:0; overflow-y:auto; max-height:calc(100vh - 220px)">
+
+      <div id="device-ports-table-wrap">
+        <table class="ports-table">
+          <thead>
+            <tr>
+              <th>Switch</th>
+              <th>Port</th>
+              <th>Type</th>
+              <th>Speed</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="device-ports-tbody"></tbody>
+        </table>
+        <p id="device-ports-empty" class="empty-sw hidden">No ports assigned.</p>
+      </div>
+
+      <div class="add-port-section">
+        <div class="add-port-header">Add connection</div>
+        <div class="add-port-form">
+          <div class="add-port-row">
+            <label>Switch</label>
+            <select id="dp-switch" class="port-select" onchange="loadDevicePortOptions()">
+              <option value="">— select switch —</option>
+            </select>
+            <label>Port</label>
+            <select id="dp-port" class="port-select">
+              <option value="">— select port —</option>
+            </select>
+            <button class="btn btn-sm" onclick="connectDevicePort()">Connect</button>
+          </div>
+          <p id="dp-error" class="form-error"></p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script src="/static/app.js"></script>
 </body>

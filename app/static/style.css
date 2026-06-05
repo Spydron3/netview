@@ -491,8 +491,9 @@ tr:hover td { background: var(--surface2); }
 
 .topo-node-switch rect          { fill: color-mix(in srgb, var(--blue) 18%, var(--surface)); stroke: var(--blue); }
 .topo-node-external_switch rect { fill: color-mix(in srgb, var(--purple) 18%, var(--surface)); stroke: var(--purple); }
-.topo-node-device circle        { fill: color-mix(in srgb, var(--green) 22%, var(--surface)); stroke: var(--green); }
-.topo-node-unknown_device circle{ fill: var(--surface2); stroke: var(--yellow); stroke-dasharray: 4 2; }
+.topo-node-device circle                   { fill: color-mix(in srgb, var(--green) 22%, var(--surface)); stroke: var(--green); }
+.topo-node-device.topo-node-offline circle { fill: var(--surface2); stroke: var(--muted); stroke-dasharray: 4 2; }
+.topo-node-unknown_device circle           { fill: var(--surface2); stroke: var(--yellow); stroke-dasharray: 4 2; }
 
 .topo-node text {
   fill: var(--text);
@@ -575,48 +576,21 @@ tr:hover td { background: var(--surface2); }
   z-index: 500;
 }
 
-/* ── device port assignment ── */
-.device-port-row { margin-top: 2px; }
-.device-port-section {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-}
-.port-assign-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background: color-mix(in srgb, var(--blue) 12%, var(--surface2));
-  border: 1px solid color-mix(in srgb, var(--blue) 30%, transparent);
-  border-radius: 4px;
-  padding: 2px 4px 2px 6px;
+/* ── device ports button on card ── */
+.device-ports-btn {
+  margin-top: 4px;
+  width: 100%;
   font-size: 11px;
-  color: var(--text);
-  white-space: nowrap;
-}
-.port-chip-remove {
-  background: none;
-  border: none;
   color: var(--muted);
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
-  padding: 0 1px;
 }
-.port-chip-remove:hover { color: var(--red); }
-.port-assign-select {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 6px;
-  color: var(--muted);
+.device-ports-btn:hover { color: var(--text); }
+
+/* ── port type badge (device ports modal) ── */
+.port-type-badge {
   font-size: 11px;
-  outline: none;
-  cursor: pointer;
-  max-width: 100%;
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
 }
-.port-assign-select:focus { border-color: var(--blue); }
 
 /* ── ports modal table ── */
 .modal-subtitle {

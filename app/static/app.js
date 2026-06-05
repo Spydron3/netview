@@ -70,7 +70,7 @@ function showSettingsMsg(text, error = false) {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeSettings(); closePortsModal(); }
+  if (e.key === 'Escape') { closeSettings(); closePortsModal(); closeDevicePortsModal(); }
 });
 
 // ── data loading ──────────────────────────────────────────────────────────────
@@ -180,9 +180,11 @@ function renderDevices(devices) {
           ${ports.map(p => `<span class="port-chip" title="${esc(p.service || p.protocol)}">${p.port}</span>`).join('')}
           ${extra > 0 ? `<span class="port-more">+${extra} more</span>` : ''}
         </div>` : ''}
-      <div class="device-port-row">
-        ${renderPortSection(d.id, d.switch_ports || [])}
-      </div>
+      <button class="btn btn-sm btn-ghost device-ports-btn" onclick="openDevicePortsModal(${d.id})">
+        ${(d.switch_ports || []).length > 0
+          ? `${d.switch_ports.length} port${d.switch_ports.length !== 1 ? 's' : ''}`
+          : 'Assign port'}
+      </button>
       <div class="device-footer">
         ${d.is_online
           ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}`
@@ -192,71 +194,106 @@ function renderDevices(devices) {
   }).join('');
 }
 
-function renderPortSection(deviceId, switchPorts) {
-  const assignedIds = new Set(switchPorts.map(p => p.id));
+// ── device ports modal ───────────────────────────────────────────────────────
 
-  const chips = switchPorts.map(p => {
-    const label = `${p.switch_name}: ${p.label || ('Port ' + p.port_number)}`;
-    return `<span class="port-assign-chip">${esc(label)}<button class="port-chip-remove" onclick="removeDevicePort(${deviceId},${p.id})">×</button></span>`;
-  }).join('');
+let _devicePortsModalId = null;
 
-  // Add dropdown: ports not already assigned to this device
-  const bySwitch = {};
-  for (const p of allPorts) {
-    if (assignedIds.has(p.id)) continue;
-    if (!bySwitch[p.switch_id]) bySwitch[p.switch_id] = { name: p.switch_name, ports: [] };
-    bySwitch[p.switch_id].ports.push(p);
-  }
+async function openDevicePortsModal(deviceId) {
+  _devicePortsModalId = deviceId;
+  el('dp-error').textContent = '';
 
-  let addSelect = '';
-  if (Object.keys(bySwitch).length > 0) {
-    let opts = `<option value="">+ add port</option>`;
-    for (const swId of Object.keys(bySwitch)) {
-      const sw = bySwitch[swId];
-      opts += `<optgroup label="${esc(sw.name)}">`;
-      for (const p of sw.ports) {
-        const label = `${p.label || ('Port ' + p.port_number)} (${p.port_type}·${p.speed})`;
-        const taken = p.device_id && p.device_id !== deviceId ? ` — ${esc(p.device_label || 'in use')}` : '';
-        opts += `<option value="${p.id}">${esc(label)}${taken}</option>`;
-      }
-      opts += `</optgroup>`;
-    }
-    addSelect = `<select class="port-assign-select" onchange="addDevicePort(${deviceId},this)">${opts}</select>`;
-  }
+  const dev = allDevices.find(d => d.id === deviceId);
+  el('device-ports-modal-title').textContent = dev ? (dev.name || dev.ip_address) : 'Device';
+  el('device-ports-modal-sub').textContent   = dev?.name ? dev.ip_address : '';
 
-  return `<div class="device-port-section">${chips}${addSelect}</div>`;
+  // populate switch dropdown
+  const switches = await apiFetch('/api/switches');
+  el('dp-switch').innerHTML = '<option value="">— select switch —</option>' +
+    switches.map(s => `<option value="${s.id}">${esc(s.name || s.ip_address)}</option>`).join('');
+  el('dp-port').innerHTML = '<option value="">— select port —</option>';
+
+  el('device-ports-modal').classList.remove('hidden');
+  await refreshDevicePortsModal();
 }
 
-async function addDevicePort(deviceId, selectEl) {
-  const portId = parseInt(selectEl.value);
-  if (!portId) return;
-  selectEl.value = '';  // reset immediately
+function closeDevicePortsModal() {
+  el('device-ports-modal').classList.add('hidden');
+  _devicePortsModalId = null;
+}
+
+async function refreshDevicePortsModal() {
+  if (!_devicePortsModalId) return;
+  const dev = await apiFetch(`/api/devices/${_devicePortsModalId}`);
+
+  // keep allDevices in sync
+  const idx = allDevices.findIndex(d => d.id === _devicePortsModalId);
+  if (idx >= 0) allDevices[idx] = dev;
+
+  const ports = dev.switch_ports || [];
+  const tbody = el('device-ports-tbody');
+  const empty = el('device-ports-empty');
+
+  if (!ports.length) {
+    tbody.innerHTML = '';
+    empty.classList.remove('hidden');
+  } else {
+    empty.classList.add('hidden');
+    tbody.innerHTML = ports.map(p => `
+      <tr>
+        <td>${esc(p.switch_name)}</td>
+        <td>${esc(p.label || ('Port ' + p.port_number))}</td>
+        <td><span class="port-type-badge">${esc(p.port_type)}</span></td>
+        <td>${esc(p.speed)}</td>
+        <td><button class="btn-delete" onclick="disconnectDevicePort(${p.id})" title="Remove">✕</button></td>
+      </tr>`).join('');
+  }
+}
+
+async function loadDevicePortOptions() {
+  const switchId = el('dp-switch').value;
+  const portSel  = el('dp-port');
+  if (!switchId) { portSel.innerHTML = '<option value="">— select port —</option>'; return; }
+
+  const ports = await apiFetch(`/api/switches/${switchId}/ports`);
+  const dev = allDevices.find(d => d.id === _devicePortsModalId);
+  const assignedIds = new Set((dev?.switch_ports || []).map(p => p.id));
+
+  portSel.innerHTML = '<option value="">— select port —</option>' +
+    ports.map(p => {
+      if (assignedIds.has(p.id)) return '';
+      const label = (p.label || ('Port ' + p.port_number)) + ` (${p.port_type}·${p.speed})`;
+      const taken = p.device_id ? ' — in use' : '';
+      return `<option value="${p.id}">${esc(label)}${taken}</option>`;
+    }).join('');
+}
+
+async function connectDevicePort() {
+  const portId = el('dp-port').value;
+  el('dp-error').textContent = '';
+  if (!portId) { el('dp-error').textContent = 'Select a port.'; return; }
   try {
-    const updated = await apiFetch(`/api/devices/${deviceId}/port`, {
+    await apiFetch(`/api/devices/${_devicePortsModalId}/port`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ switch_port_id: portId }),
+      body: JSON.stringify({ switch_port_id: parseInt(portId) }),
     });
-    const idx = allDevices.findIndex(d => d.id === deviceId);
-    if (idx >= 0) allDevices[idx] = updated;
-    await loadAllPorts();
+    el('dp-switch').value = '';
+    el('dp-port').innerHTML = '<option value="">— select port —</option>';
+    await Promise.all([loadAllPorts(), refreshDevicePortsModal()]);
     applyFilter();
     if (currentTab === 'topology') loadTopology();
   } catch (e) {
-    console.error('addDevicePort:', e);
-    applyFilter();
+    el('dp-error').textContent = e.message || 'Failed to connect.';
   }
 }
 
-async function removeDevicePort(deviceId, portId) {
+async function disconnectDevicePort(portId) {
   try {
-    await apiFetch(`/api/devices/${deviceId}/ports/${portId}`, { method: 'DELETE' });
-    const dev = allDevices.find(d => d.id === deviceId);
-    if (dev) dev.switch_ports = (dev.switch_ports || []).filter(p => p.id !== portId);
-    await loadAllPorts();
+    await apiFetch(`/api/devices/${_devicePortsModalId}/ports/${portId}`, { method: 'DELETE' });
+    await Promise.all([loadAllPorts(), refreshDevicePortsModal()]);
     applyFilter();
     if (currentTab === 'topology') loadTopology();
-  } catch (e) { console.error('removeDevicePort:', e); }
+  } catch (e) { console.error('disconnectDevicePort:', e); }
 }
 
 // ── name editing ─────────────────────────────────────────────────────────────
@@ -737,7 +774,11 @@ function renderTopology(data) {
 
   const nodeG = g.append('g').attr('class', 'topo-nodes');
   const node = nodeG.selectAll('g').data(nodes).join('g')
-    .attr('class', d => `topo-node topo-node-${d.type}`)
+    .attr('class', d => {
+      let cls = `topo-node topo-node-${d.type}`;
+      if (d.type === 'device' && d.is_online === false) cls += ' topo-node-offline';
+      return cls;
+    })
     .call(d3.drag()
       .on('start', (ev, d) => { if (!ev.active) topoSimulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
       .on('drag',  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
