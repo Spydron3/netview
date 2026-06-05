@@ -108,7 +108,10 @@ def _run_scan() -> None:
         new_devices: list[dict] = []
 
         with get_db() as db:
-            db.execute(sa.update(Device).values(is_online=False))
+            db.execute(
+                sa.update(Device).values(is_online=False)
+                .where(sa.or_(Device.is_switch == False, Device.ip_address.isnot(None)))  # noqa: E712
+            )
 
             for d in devices:
                 existing = db.execute(
@@ -216,7 +219,12 @@ def api_stats():
     with get_db() as db:
         total = db.execute(sa.select(sa.func.count(Device.id))).scalar_one()
         online = db.execute(
-            sa.select(sa.func.count(Device.id)).where(Device.is_online.is_(True))
+            sa.select(sa.func.count(Device.id)).where(
+                sa.or_(
+                    Device.is_online.is_(True),
+                    sa.and_(Device.is_switch == True, Device.ip_address.is_(None))  # noqa: E712
+                )
+            )
         ).scalar_one()
         last_scan = db.execute(
             sa.select(ScanRun)
@@ -1063,7 +1071,7 @@ def api_topology():
                         "label": _dev_label(dev),
                         "ip": dev.ip_address, "mac": dev.mac_address,
                         "hostname": dev.hostname, "vendor": dev.vendor,
-                        "name": dev.name, "is_online": dev.is_online,
+                        "name": dev.name, "is_online": True if (dev.is_switch and not dev.ip_address) else dev.is_online,
                         "is_wireless": dev.is_wireless,
                         "room": rooms.get(dev.room_id),
                     })
@@ -1127,7 +1135,7 @@ def api_topology():
                         "label": _dev_label(_d),
                         "ip": _d.ip_address, "mac": _d.mac_address,
                         "hostname": _d.hostname, "vendor": _d.vendor,
-                        "name": _d.name, "is_online": _d.is_online,
+                        "name": _d.name, "is_online": True if (_d.is_switch and not _d.ip_address) else _d.is_online,
                         "is_wireless": _d.is_wireless,
                         "room": rooms.get(_d.room_id),
                     })
@@ -1148,7 +1156,7 @@ def api_topology():
                     "label": _dev_label(dev),
                     "ip": dev.ip_address, "mac": dev.mac_address,
                     "hostname": dev.hostname, "vendor": dev.vendor,
-                    "name": dev.name, "is_online": dev.is_online,
+                    "name": dev.name, "is_online": True if (dev.is_switch and not dev.ip_address) else dev.is_online,
                     "is_wireless": True,
                     "room": rooms.get(dev.room_id),
                 })
@@ -1262,7 +1270,7 @@ def _device_to_dict(d: Device, ports: list | None = None, rooms: dict | None = N
         "hostname": d.hostname,
         "vendor": d.vendor,
         "os_info": d.os_info,
-        "is_online": d.is_online,
+        "is_online": True if (d.is_switch and not d.ip_address) else d.is_online,
         "open_ports": d.open_ports or [],
         "response_time": d.response_time,
         "first_seen": d.first_seen.isoformat() if d.first_seen else None,
