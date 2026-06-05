@@ -576,11 +576,36 @@ tr:hover td { background: var(--surface2); }
 }
 
 /* ── device port assignment ── */
-.device-port-row {
-  margin-top: 2px;
+.device-port-row { margin-top: 2px; }
+.device-port-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
 }
+.port-assign-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: color-mix(in srgb, var(--blue) 12%, var(--surface2));
+  border: 1px solid color-mix(in srgb, var(--blue) 30%, transparent);
+  border-radius: 4px;
+  padding: 2px 4px 2px 6px;
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.port-chip-remove {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 1px;
+}
+.port-chip-remove:hover { color: var(--red); }
 .port-assign-select {
-  width: 100%;
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -589,6 +614,7 @@ tr:hover td { background: var(--surface2); }
   font-size: 11px;
   outline: none;
   cursor: pointer;
+  max-width: 100%;
 }
 .port-assign-select:focus { border-color: var(--blue); }
 

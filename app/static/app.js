@@ -161,7 +161,6 @@ function renderDevices(devices) {
     const statusClass = d.is_online ? 'online' : 'offline';
     const ports = (d.open_ports || []).slice(0, 6);
     const extra = (d.open_ports || []).length - ports.length;
-    const portInfo = d.switch_port;
 
     return `<div class="device-card ${d.is_online ? '' : 'offline'}">
       <div class="device-top">
@@ -182,7 +181,7 @@ function renderDevices(devices) {
           ${extra > 0 ? `<span class="port-more">+${extra} more</span>` : ''}
         </div>` : ''}
       <div class="device-port-row">
-        ${renderPortSelect(d.id, portInfo)}
+        ${renderPortSection(d.id, d.switch_ports || [])}
       </div>
       <div class="device-footer">
         ${d.is_online
@@ -193,55 +192,71 @@ function renderDevices(devices) {
   }).join('');
 }
 
-function renderPortSelect(deviceId, currentPort) {
-  // Group allPorts by switch
+function renderPortSection(deviceId, switchPorts) {
+  const assignedIds = new Set(switchPorts.map(p => p.id));
+
+  const chips = switchPorts.map(p => {
+    const label = `${p.switch_name}: ${p.label || ('Port ' + p.port_number)}`;
+    return `<span class="port-assign-chip">${esc(label)}<button class="port-chip-remove" onclick="removeDevicePort(${deviceId},${p.id})">×</button></span>`;
+  }).join('');
+
+  // Add dropdown: ports not already assigned to this device
   const bySwitch = {};
   for (const p of allPorts) {
+    if (assignedIds.has(p.id)) continue;
     if (!bySwitch[p.switch_id]) bySwitch[p.switch_id] = { name: p.switch_name, ports: [] };
     bySwitch[p.switch_id].ports.push(p);
   }
 
-  const currentPortId = currentPort ? currentPort.id : '';
-  let opts = `<option value="">— no port —</option>`;
-  for (const swId of Object.keys(bySwitch)) {
-    const sw = bySwitch[swId];
-    opts += `<optgroup label="${esc(sw.name)}">`;
-    for (const p of sw.ports) {
-      const label = `${p.label || ('Port ' + p.port_number)} (${p.port_type} · ${p.speed})`;
-      const taken = p.device_id && p.device_id !== deviceId
-        ? ` — ${esc(p.device_label || 'in use')}` : '';
-      opts += `<option value="${p.id}" ${p.id === currentPortId ? 'selected' : ''}>${esc(label)}${taken}</option>`;
+  let addSelect = '';
+  if (Object.keys(bySwitch).length > 0) {
+    let opts = `<option value="">+ add port</option>`;
+    for (const swId of Object.keys(bySwitch)) {
+      const sw = bySwitch[swId];
+      opts += `<optgroup label="${esc(sw.name)}">`;
+      for (const p of sw.ports) {
+        const label = `${p.label || ('Port ' + p.port_number)} (${p.port_type}·${p.speed})`;
+        const taken = p.device_id && p.device_id !== deviceId ? ` — ${esc(p.device_label || 'in use')}` : '';
+        opts += `<option value="${p.id}">${esc(label)}${taken}</option>`;
+      }
+      opts += `</optgroup>`;
     }
-    opts += `</optgroup>`;
+    addSelect = `<select class="port-assign-select" onchange="addDevicePort(${deviceId},this)">${opts}</select>`;
   }
 
-  const label = currentPort
-    ? `${currentPort.switch_name}: ${currentPort.label || ('Port ' + currentPort.port_number)}`
-    : 'No port';
-
-  return `<select class="port-assign-select" title="${esc(label)}"
-    onchange="assignDevicePort(${deviceId}, this)">${opts}</select>`;
+  return `<div class="device-port-section">${chips}${addSelect}</div>`;
 }
 
-async function assignDevicePort(deviceId, selectEl) {
-  const portId = selectEl.value ? parseInt(selectEl.value) : null;
+async function addDevicePort(deviceId, selectEl) {
+  const portId = parseInt(selectEl.value);
+  if (!portId) return;
+  selectEl.value = '';  // reset immediately
   try {
     const updated = await apiFetch(`/api/devices/${deviceId}/port`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ switch_port_id: portId }),
     });
-    // update local state
     const idx = allDevices.findIndex(d => d.id === deviceId);
     if (idx >= 0) allDevices[idx] = updated;
-    // also refresh allPorts so other cards show the updated assignment
     await loadAllPorts();
     applyFilter();
     if (currentTab === 'topology') loadTopology();
   } catch (e) {
-    console.error('assignDevicePort:', e);
-    applyFilter(); // revert select
+    console.error('addDevicePort:', e);
+    applyFilter();
   }
+}
+
+async function removeDevicePort(deviceId, portId) {
+  try {
+    await apiFetch(`/api/devices/${deviceId}/ports/${portId}`, { method: 'DELETE' });
+    const dev = allDevices.find(d => d.id === deviceId);
+    if (dev) dev.switch_ports = (dev.switch_ports || []).filter(p => p.id !== portId);
+    await loadAllPorts();
+    applyFilter();
+    if (currentTab === 'topology') loadTopology();
+  } catch (e) { console.error('removeDevicePort:', e); }
 }
 
 // ── name editing ─────────────────────────────────────────────────────────────

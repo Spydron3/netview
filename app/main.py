@@ -171,6 +171,15 @@ def api_stats():
 
 # ── devices ───────────────────────────────────────────────────────────────────
 
+def _device_ports(db, device_id: int) -> list:
+    return db.execute(
+        sa.select(SwitchPort, Switch)
+        .join(Switch, Switch.id == SwitchPort.switch_id)
+        .where(SwitchPort.device_id == device_id)
+        .order_by(Switch.ip_address, SwitchPort.port_number)
+    ).all()
+
+
 @app.get("/api/devices")
 def api_devices():
     with get_db() as db:
@@ -181,21 +190,25 @@ def api_devices():
             .outerjoin(Switch, Switch.id == SwitchPort.switch_id)
             .order_by(Device.is_online.desc(), sa.cast(Device.ip_address, INET))
         ).all()
-        return [_device_to_dict(d, p, s) for d, p, s in rows]
+        # aggregate: group port rows per device while preserving query order
+        order: list[int] = []
+        by_id: dict[int, tuple] = {}
+        for dev, port, sw in rows:
+            if dev.id not in by_id:
+                order.append(dev.id)
+                by_id[dev.id] = (dev, [])
+            if port and sw:
+                by_id[dev.id][1].append((port, sw))
+        return [_device_to_dict(*by_id[did]) for did in order]
 
 
 @app.get("/api/devices/{device_id}")
 def api_device(device_id: int):
     with get_db() as db:
-        row = db.execute(
-            sa.select(Device, SwitchPort, Switch)
-            .outerjoin(SwitchPort, SwitchPort.device_id == Device.id)
-            .outerjoin(Switch, Switch.id == SwitchPort.switch_id)
-            .where(Device.id == device_id)
-        ).first()
-        if not row:
+        dev = db.get(Device, device_id)
+        if not dev:
             raise HTTPException(status_code=404, detail="Device not found")
-        return _device_to_dict(*row)
+        return _device_to_dict(dev, _device_ports(db, device_id))
 
 
 class DeviceUpdate(BaseModel):
@@ -209,48 +222,35 @@ def api_update_device(device_id: int, body: DeviceUpdate):
         if not d:
             raise HTTPException(status_code=404, detail="Device not found")
         d.name = body.name.strip() if body.name and body.name.strip() else None
-
-        row = db.execute(
-            sa.select(Device, SwitchPort, Switch)
-            .outerjoin(SwitchPort, SwitchPort.device_id == Device.id)
-            .outerjoin(Switch, Switch.id == SwitchPort.switch_id)
-            .where(Device.id == device_id)
-        ).first()
-        return _device_to_dict(*row) if row else _device_to_dict(d)
+        db.flush()
+        return _device_to_dict(d, _device_ports(db, device_id))
 
 
 class DevicePortAssign(BaseModel):
-    switch_port_id: int | None
+    switch_port_id: int
 
 
 @app.put("/api/devices/{device_id}/port")
-def api_assign_device_port(device_id: int, body: DevicePortAssign):
+def api_add_device_port(device_id: int, body: DevicePortAssign):
     with get_db() as db:
         device = db.get(Device, device_id)
         if not device:
             raise HTTPException(status_code=404, detail="Device not found")
+        port = db.get(SwitchPort, body.switch_port_id)
+        if not port:
+            raise HTTPException(status_code=404, detail="Port not found")
+        port.device_id = device_id  # port is exclusive; previous device loses it
+        db.flush()
+        return _device_to_dict(device, _device_ports(db, device_id))
 
-        # clear any existing port assignment for this device
-        existing = db.execute(
-            sa.select(SwitchPort).where(SwitchPort.device_id == device_id)
-        ).scalars().all()
-        for p in existing:
-            p.device_id = None
 
-        new_port = None
-        new_switch = None
-        if body.switch_port_id is not None:
-            new_port = db.get(SwitchPort, body.switch_port_id)
-            if not new_port:
-                raise HTTPException(status_code=404, detail="Port not found")
-            # if port is currently claimed by another device, release it
-            if new_port.device_id is not None and new_port.device_id != device_id:
-                new_port.device_id = None
-                db.flush()
-            new_port.device_id = device_id
-            new_switch = db.get(Switch, new_port.switch_id)
-
-        return _device_to_dict(device, new_port, new_switch)
+@app.delete("/api/devices/{device_id}/ports/{port_id}", status_code=204)
+def api_remove_device_port(device_id: int, port_id: int):
+    with get_db() as db:
+        port = db.get(SwitchPort, port_id)
+        if not port or port.device_id != device_id:
+            raise HTTPException(status_code=404, detail="Port assignment not found")
+        port.device_id = None
 
 
 # ── settings ──────────────────────────────────────────────────────────────────
@@ -451,13 +451,6 @@ def api_update_port(switch_id: int, port_id: int, body: PortUpdate):
         if "label" in fields:
             port.label = body.label
         if "device_id" in fields:
-            if body.device_id is not None:
-                # release device from any other port first
-                db.execute(
-                    sa.update(SwitchPort)
-                    .where(SwitchPort.device_id == body.device_id, SwitchPort.id != port_id)
-                    .values(device_id=None)
-                )
             port.device_id = body.device_id
 
         db.flush()
@@ -659,7 +652,7 @@ def _port_to_dict(p: SwitchPort, sw: Switch, dev: Device | None) -> dict:
     }
 
 
-def _device_to_dict(d: Device, port: SwitchPort | None = None, sw: Switch | None = None) -> dict:
+def _device_to_dict(d: Device, ports: list | None = None) -> dict:
     return {
         "id": d.id,
         "ip_address": d.ip_address,
@@ -674,16 +667,19 @@ def _device_to_dict(d: Device, port: SwitchPort | None = None, sw: Switch | None
         "first_seen": d.first_seen.isoformat() if d.first_seen else None,
         "last_seen": d.last_seen.isoformat() if d.last_seen else None,
         "scan_count": d.scan_count,
-        "switch_port": {
-            "id": port.id,
-            "switch_id": port.switch_id,
-            "switch_name": sw.name or sw.ip_address,
-            "switch_ip": sw.ip_address,
-            "port_number": port.port_number,
-            "label": port.label,
-            "port_type": port.port_type,
-            "speed": port.speed,
-        } if port and sw else None,
+        "switch_ports": [
+            {
+                "id": p.id,
+                "switch_id": sw.id,
+                "switch_name": sw.name or sw.ip_address,
+                "switch_ip": sw.ip_address,
+                "port_number": p.port_number,
+                "label": p.label,
+                "port_type": p.port_type,
+                "speed": p.speed,
+            }
+            for p, sw in (ports or [])
+        ],
     }
 
 
