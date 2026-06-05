@@ -570,6 +570,9 @@ def api_topology():
         edges: list[dict] = []
         seen: set[str] = set()
 
+        # IP → switch map so devices that are also switches don't appear twice
+        sw_by_ip = {sw.ip_address: sw for sw in switches}
+
         for sw in switches:
             nid = f"sw_{sw.id}"
             nodes.append({
@@ -583,16 +586,24 @@ def api_topology():
             src = f"sw_{port.switch_id}"
             if src not in seen:
                 continue
-            tgt = f"dev_{dev.id}"
-            if tgt not in seen:
-                nodes.append({
-                    "id": tgt, "type": "device",
-                    "label": dev.name or dev.hostname or dev.ip_address,
-                    "ip": dev.ip_address, "mac": dev.mac_address,
-                    "hostname": dev.hostname, "vendor": dev.vendor,
-                    "name": dev.name, "is_online": dev.is_online,
-                })
-                seen.add(tgt)
+
+            # if this device's IP matches a configured switch, link to that switch
+            # node directly — avoids a duplicate device circle for managed switches
+            matched_sw = sw_by_ip.get(dev.ip_address)
+            if matched_sw and matched_sw.id != port.switch_id:
+                tgt = f"sw_{matched_sw.id}"
+            else:
+                tgt = f"dev_{dev.id}"
+                if tgt not in seen:
+                    nodes.append({
+                        "id": tgt, "type": "device",
+                        "label": dev.name or dev.hostname or dev.ip_address,
+                        "ip": dev.ip_address, "mac": dev.mac_address,
+                        "hostname": dev.hostname, "vendor": dev.vendor,
+                        "name": dev.name, "is_online": dev.is_online,
+                    })
+                    seen.add(tgt)
+
             edges.append({
                 "source": src, "target": tgt,
                 "port": port.label or f"Port {port.port_number}",
