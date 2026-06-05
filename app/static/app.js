@@ -272,16 +272,36 @@ function closeDevicePortsModal() {
 
 async function refreshDevicePortsModal() {
   if (!_devicePortsModalId) return;
-  const dev = await apiFetch(`/api/devices/${_devicePortsModalId}`);
+  const [dev, ifaces] = await Promise.all([
+    apiFetch(`/api/devices/${_devicePortsModalId}`),
+    apiFetch(`/api/devices/${_devicePortsModalId}/device-ports`),
+  ]);
 
   // keep allDevices in sync
   const idx = allDevices.findIndex(d => d.id === _devicePortsModalId);
   if (idx >= 0) allDevices[idx] = dev;
 
+  // render interfaces list
+  const ifaceList = el('dp-ifaces-list');
+  ifaceList.innerHTML = ifaces.length
+    ? ifaces.map(i => `
+        <div class="dp-iface-row">
+          <span class="dp-iface-label">${esc(i.label)}</span>
+          <button class="btn-delete" onclick="removeDeviceInterface(${i.id})" title="Remove">✕</button>
+        </div>`).join('')
+    : '<p class="empty-sw" style="padding:6px 16px">No interfaces defined.</p>';
+
+  // populate interface dropdown in "add connection"
+  const dpSel = el('dp-dev-port');
+  const connectedDpIds = new Set((dev.switch_ports || []).map(p => p.dev_port_id));
+  dpSel.innerHTML = '<option value="">— select interface —</option>' +
+    ifaces.filter(i => !connectedDpIds.has(i.id))
+      .map(i => `<option value="${i.id}">${esc(i.label)}</option>`).join('');
+
+  // render connections table
   const ports = dev.switch_ports || [];
   const tbody = el('device-ports-tbody');
   const empty = el('device-ports-empty');
-
   if (!ports.length) {
     tbody.innerHTML = '';
     empty.classList.remove('hidden');
@@ -289,13 +309,40 @@ async function refreshDevicePortsModal() {
     empty.classList.add('hidden');
     tbody.innerHTML = ports.map(p => `
       <tr>
+        <td><code>${esc(p.dev_port_label)}</code></td>
         <td>${esc(p.switch_name)}</td>
         <td>${esc(p.label || ('Port ' + p.port_number))}</td>
         <td><span class="port-type-badge">${esc(p.port_type)}</span></td>
         <td>${esc(p.speed)}</td>
-        <td><button class="btn-delete" onclick="disconnectDevicePort(${p.id})" title="Remove">✕</button></td>
+        <td><button class="btn-delete" onclick="disconnectDevicePort(${p.id})" title="Disconnect">✕</button></td>
       </tr>`).join('');
   }
+}
+
+async function addDeviceInterface() {
+  const label = el('dp-iface-label').value.trim();
+  el('dp-iface-error').textContent = '';
+  if (!label) { el('dp-iface-error').textContent = 'Enter a label.'; return; }
+  try {
+    await apiFetch(`/api/devices/${_devicePortsModalId}/device-ports`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label }),
+    });
+    el('dp-iface-label').value = '';
+    await refreshDevicePortsModal();
+  } catch (e) {
+    el('dp-iface-error').textContent = e.message || 'Failed.';
+  }
+}
+
+async function removeDeviceInterface(dpId) {
+  try {
+    await apiFetch(`/api/devices/${_devicePortsModalId}/device-ports/${dpId}`, { method: 'DELETE' });
+    await Promise.all([loadAllPorts(), refreshDevicePortsModal()]);
+    applyFilter();
+    if (currentTab === 'topology') loadTopology();
+  } catch (e) { console.error('removeDeviceInterface:', e); }
 }
 
 async function loadDevicePortOptions() {
@@ -317,14 +364,16 @@ async function loadDevicePortOptions() {
 }
 
 async function connectDevicePort() {
+  const dpId   = el('dp-dev-port').value;
   const portId = el('dp-port').value;
   el('dp-error').textContent = '';
-  if (!portId) { el('dp-error').textContent = 'Select a port.'; return; }
+  if (!dpId)   { el('dp-error').textContent = 'Select a device interface.'; return; }
+  if (!portId) { el('dp-error').textContent = 'Select a switch port.'; return; }
   try {
     await apiFetch(`/api/devices/${_devicePortsModalId}/port`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ switch_port_id: parseInt(portId) }),
+      body: JSON.stringify({ dev_port_id: parseInt(dpId), switch_port_id: parseInt(portId) }),
     });
     el('dp-switch').value = '';
     el('dp-port').innerHTML = '<option value="">— select port —</option>';
@@ -675,12 +724,7 @@ function renderPortRow(port, devices) {
     `<option value="${s}" ${s === port.speed ? 'selected' : ''}>${s}</option>`
   ).join('');
 
-  const devOpts = `<option value="">— none —</option>` +
-    devices.map(d => {
-      const label = d.name || d.hostname || d.ip_address;
-      const selected = d.id === port.device_id ? 'selected' : '';
-      return `<option value="${d.id}" ${selected}>${esc(label)}</option>`;
-    }).join('');
+  const devLabel = port.device_label ? esc(port.device_label) : '<span class="port-no-device">—</span>';
 
   return `<tr data-port-id="${port.id}">
     <td class="port-num">${port.port_number}</td>
@@ -688,7 +732,7 @@ function renderPortRow(port, devices) {
       placeholder="label" onchange="savePortField(${port.id}, 'label', this.value)" /></td>
     <td><select class="port-select" onchange="savePortField(${port.id}, 'port_type', this.value)">${typeOpts}</select></td>
     <td><select class="port-select" onchange="savePortField(${port.id}, 'speed', this.value)">${speedOpts}</select></td>
-    <td><select class="port-select port-device-select" onchange="savePortDevice(${port.id}, this)">${devOpts}</select></td>
+    <td class="port-device-cell">${devLabel}</td>
     <td><button class="btn-delete" onclick="deletePort(${port.id})" title="Delete port">✕</button></td>
   </tr>`;
 }
@@ -705,24 +749,6 @@ async function savePortField(portId, field, value) {
     applyFilter();
   } catch (e) {
     console.error('savePortField:', e);
-  }
-}
-
-async function savePortDevice(portId, selectEl) {
-  const deviceId = selectEl.value ? parseInt(selectEl.value) : null;
-  try {
-    await apiFetch(`/api/switches/${_portsModalSwitchId}/ports/${portId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_id: deviceId }),
-    });
-    await Promise.all([loadAllPorts(), loadDevices(), loadSwitches()]);
-    if (currentTab === 'topology') loadTopology();
-    // re-render just the modal row without closing it
-    await refreshPortsModal();
-  } catch (e) {
-    console.error('savePortDevice:', e);
-    await refreshPortsModal();
   }
 }
 

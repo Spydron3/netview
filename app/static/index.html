@@ -293,10 +293,25 @@
     </div>
     <div class="modal-body" style="padding:0; overflow-y:auto; max-height:calc(100vh - 220px)">
 
+      <!-- interfaces section -->
+      <div class="add-port-section">
+        <div class="add-port-header">Interfaces</div>
+        <div id="dp-ifaces-list" class="dp-ifaces-list"></div>
+        <div class="add-port-form">
+          <div class="add-port-row">
+            <input id="dp-iface-label" type="text" placeholder="e.g. eth0, NIC 1" class="port-input" />
+            <button class="btn btn-sm" onclick="addDeviceInterface()">Add Interface</button>
+            <span id="dp-iface-error" class="form-error"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- connections table -->
       <div id="device-ports-table-wrap">
         <table class="ports-table">
           <thead>
             <tr>
+              <th>Interface</th>
               <th>Switch</th>
               <th>Port</th>
               <th>Type</th>
@@ -306,13 +321,18 @@
           </thead>
           <tbody id="device-ports-tbody"></tbody>
         </table>
-        <p id="device-ports-empty" class="empty-sw hidden">No ports assigned.</p>
+        <p id="device-ports-empty" class="empty-sw hidden">No connections yet.</p>
       </div>
 
+      <!-- add connection -->
       <div class="add-port-section">
         <div class="add-port-header">Add connection</div>
         <div class="add-port-form">
           <div class="add-port-row">
+            <label>Interface</label>
+            <select id="dp-dev-port" class="port-select">
+              <option value="">— select interface —</option>
+            </select>
             <label>Switch</label>
             <select id="dp-switch" class="port-select" onchange="loadDevicePortOptions()">
               <option value="">— select switch —</option>

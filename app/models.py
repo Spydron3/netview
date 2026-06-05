@@ -53,18 +53,27 @@ class SwitchPort(Base):
     speed = Column(String(10), nullable=False, default="1G")
 
 
+class DevicePort(Base):
+    """A named interface on a device (e.g. eth0, NIC 1). Used as one end of a PortLink."""
+    __tablename__ = "device_ports"
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    device_id = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False)
+    label     = Column(String(50), nullable=False)
+
+
 class PortLink(Base):
-    """One row per cable. port_a is always a switch port.
-    - device connection:   device_id set, port_b_id NULL
-    - switch-to-switch:    port_b_id set, device_id NULL
-    Both port_a_id and port_b_id are UNIQUE so each port appears in at most one link.
+    """One row per cable. port_a_id is always a switch port.
+    - device connection:   dev_port_id set (references DevicePort), port_b_id NULL
+    - switch-to-switch:    port_b_id set (another switch port),     dev_port_id NULL
+    All three port columns are UNIQUE so each port appears in at most one link.
     """
     __tablename__ = "port_links"
 
-    id        = Column(Integer, primary_key=True, autoincrement=True)
-    port_a_id = Column(Integer, ForeignKey("switch_ports.id", ondelete="CASCADE"), nullable=False, unique=True)
-    device_id = Column(Integer, ForeignKey("devices.id",      ondelete="CASCADE"), nullable=True)
-    port_b_id = Column(Integer, ForeignKey("switch_ports.id", ondelete="CASCADE"), nullable=True,  unique=True)
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    port_a_id   = Column(Integer, ForeignKey("switch_ports.id",  ondelete="CASCADE"), nullable=False, unique=True)
+    dev_port_id = Column(Integer, ForeignKey("device_ports.id",  ondelete="CASCADE"), nullable=True,  unique=True)
+    port_b_id   = Column(Integer, ForeignKey("switch_ports.id",  ondelete="CASCADE"), nullable=True,  unique=True)
 
 
 class ScanRun(Base):

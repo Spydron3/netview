@@ -932,3 +932,20 @@ tr:hover td { background: var(--surface2); }
   stroke-linecap: round;
   opacity: 0.8;
 }
+
+/* ── device interface list (device ports modal) ─────────────────────────────── */
+.dp-ifaces-list { padding: 4px 16px 8px; }
+.dp-iface-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.dp-iface-label {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--text);
+  flex: 1;
+}
+.port-no-device { color: var(--muted); }
+.port-device-cell { font-size: 12px; color: var(--blue); }
