@@ -248,6 +248,11 @@ function renderDevices(devices) {
       ${d.is_switch ? `
       <button class="btn btn-sm btn-ghost" onclick="openPortsModal(${d.id})" style="margin:4px 0 0">Manage Ports</button>
       ` : ''}
+      <div class="device-room-row">
+        <input type="text" class="room-input" value="${esc(d.room || '')}"
+          placeholder="Room…"
+          onchange="setDeviceRoom(${d.id}, this.value)" />
+      </div>
       <div class="device-footer">
         ${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
         ${d.is_online
@@ -296,6 +301,19 @@ async function setVirtualParent(deviceId, parentIdStr) {
     body: JSON.stringify({ parent_id }),
   });
   await loadDevices();
+}
+
+async function setDeviceRoom(deviceId, room) {
+  try {
+    await apiFetch(`/api/devices/${deviceId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: room.trim() || null }),
+    });
+    const idx = allDevices.findIndex(d => d.id === deviceId);
+    if (idx >= 0) allDevices[idx].room = room.trim() || null;
+    if (currentTab === 'topology') loadTopology();
+  } catch (e) { console.error('setDeviceRoom:', e); }
 }
 
 // ── device ports modal ───────────────────────────────────────────────────────
@@ -736,7 +754,7 @@ function renderPortRow(port) {
   const portLabel = JSON.stringify(port.label || ('Port ' + port.port_number));
   const devCell = port.link_id
     ? `<span>${esc(port.device_label)}</span> <button class="btn-xs" onclick="disconnectPort(${port.link_id})" title="Disconnect">✕</button>`
-    : `<button class="btn-xs btn-ghost" onclick="showPortConnect(${port.id}, ${portLabel})">+ Connect</button>`;
+    : `<button class="btn-xs btn-ghost" onclick="showPortConnect(${port.id}, ${esc(portLabel)})">+ Connect</button>`;
 
   return `<tr data-port-id="${port.id}">
     <td class="port-num">${port.port_number}</td>
@@ -885,6 +903,40 @@ function renderTopology(data) {
   topoSimulation = d3.forceSimulation(nodes)
     .force('link', d3.forceLink(edges).id(d => d.id).strength(0));
 
+  // Room group inserted before edges/nodes so boxes render behind everything
+  const roomG = g.insert('g', ':first-child').attr('class', 'topo-rooms');
+
+  function updateRoomRects() {
+    const roomMap = {};
+    nodes.forEach(d => {
+      if (!d.room) return;
+      const hw = d.type === 'switch' ? 26 : ((d.virtual_children || []).length > 0 ? 75 : 20);
+      const hh = d.type === 'switch' ? 17 : ((d.virtual_children || []).length > 0
+        ? (6 + d.virtual_children.length * 12) : 20);
+      const pad = 28;
+      if (!roomMap[d.room]) roomMap[d.room] = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
+      const r = roomMap[d.room];
+      r.x1 = Math.min(r.x1, d.x - hw - pad);
+      r.y1 = Math.min(r.y1, d.y - hh - pad);
+      r.x2 = Math.max(r.x2, d.x + hw + pad);
+      r.y2 = Math.max(r.y2, d.y + hh + pad);
+    });
+    const roomData = Object.entries(roomMap).map(([name, b]) => ({ name, ...b }));
+    const sel = roomG.selectAll('g.room-box').data(roomData, d => d.name);
+    const enter = sel.enter().append('g').attr('class', 'room-box');
+    enter.append('rect').attr('rx', 10);
+    enter.append('text').attr('class', 'room-label');
+    const merged = sel.merge(enter);
+    merged.select('rect')
+      .attr('x', d => d.x1).attr('y', d => d.y1)
+      .attr('width', d => Math.max(0, d.x2 - d.x1))
+      .attr('height', d => Math.max(0, d.y2 - d.y1));
+    merged.select('text')
+      .attr('x', d => d.x1 + 10).attr('y', d => d.y1 + 16)
+      .text(d => d.name);
+    sel.exit().remove();
+  }
+
   const edgeG = g.append('g').attr('class', 'topo-edges');
   const edge = edgeG.selectAll('path').data(edges).join('path')
     .attr('class', d => `topo-edge topo-edge-${d.type}`)
@@ -978,6 +1030,7 @@ function renderTopology(data) {
       return `M${sx},${sy} Q${cx},${cy} ${tx},${ty}`;
     });
     node.attr('transform', d => `translate(${d.x},${d.y})`);
+    updateRoomRects();
   });
 
   svg.on('click', closeNodeDetail);

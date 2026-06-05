@@ -560,6 +560,22 @@ tr:hover td { background: var(--surface2); }
 .topo-edge-switch_link { stroke: var(--blue); stroke-width: 2.5; stroke-dasharray: 8 4; }
 .topo-edge-device_link { stroke: var(--green); stroke-width: 1.5; stroke-dasharray: 4 4; }
 
+/* room group boxes */
+.room-box rect {
+  fill: var(--surface2);
+  fill-opacity: 0.55;
+  stroke: var(--border);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 3;
+}
+.room-label {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--muted);
+  pointer-events: none;
+  user-select: none;
+}
+
 /* legend */
 .topo-legend {
   position: absolute;
@@ -898,6 +914,19 @@ tr:hover td { background: var(--surface2); }
   flex: 1;
   min-width: 0;
 }
+.device-room-row { margin-top: 5px; }
+.room-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--surface2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  font-family: var(--font);
+}
+.room-input:focus { color: var(--text); outline: none; border-color: var(--blue); }
 .device-wifi-badge {
   background: color-mix(in srgb, var(--cyan, #22d3ee) 15%, transparent);
   color: var(--cyan, #22d3ee);
@@ -948,7 +977,7 @@ tr:hover td { background: var(--surface2); }
   stroke: var(--muted);
   stroke-dasharray: 2 1;
 }
-.vmchild-label {
+.topo-node text.vmchild-label {
   font-size: 9px;
   fill: var(--muted);
   text-anchor: start;

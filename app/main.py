@@ -288,6 +288,7 @@ class DeviceUpdate(BaseModel):
     is_virtual: bool | None = None
     parent_id: int | None = None
     is_wireless: bool | None = None
+    room: str | None = None
 
 
 @app.patch("/api/devices/{device_id}")
@@ -316,6 +317,8 @@ def api_update_device(device_id: int, body: DeviceUpdate):
                 if body.parent_id == device_id:
                     raise HTTPException(status_code=422, detail="Device cannot be its own parent")
             d.parent_id = body.parent_id
+        if "room" in body.model_fields_set:
+            d.room = body.room.strip() if body.room and body.room.strip() else None
         db.flush()
         return _device_to_dict(d, _device_ports(db, device_id))
 
@@ -979,6 +982,7 @@ def api_topology():
                 "id": nid, "type": "switch",
                 "label": _sw_label(sw),
                 "ip": sw.ip_address, "name": sw.name,
+                "room": sw.room,
             })
             seen.add(nid)
 
@@ -1016,6 +1020,7 @@ def api_topology():
                         "hostname": dev.hostname, "vendor": dev.vendor,
                         "name": dev.name, "is_online": dev.is_online,
                         "is_wireless": dev.is_wireless,
+                        "room": dev.room,
                     })
                     seen.add(tgt)
                 edges.append({
@@ -1079,6 +1084,7 @@ def api_topology():
                         "hostname": _d.hostname, "vendor": _d.vendor,
                         "name": _d.name, "is_online": _d.is_online,
                         "is_wireless": _d.is_wireless,
+                        "room": _d.room,
                     })
                     seen.add(_nid)
             edges.append({"source": src, "target": tgt, "type": "device_link"})
@@ -1099,6 +1105,7 @@ def api_topology():
                     "hostname": dev.hostname, "vendor": dev.vendor,
                     "name": dev.name, "is_online": dev.is_online,
                     "is_wireless": True,
+                    "room": dev.room,
                 })
                 seen.add(nid)
 
@@ -1212,6 +1219,7 @@ def _device_to_dict(d: Device, ports: list | None = None) -> dict:
         "is_virtual": d.is_virtual,
         "parent_id": d.parent_id,
         "is_wireless": d.is_wireless,
+        "room": d.room,
         "switch_ports": [
             {
                 "id": p.id,

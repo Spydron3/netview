@@ -218,6 +218,9 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                     "ALTER TABLE port_links ADD COLUMN IF NOT EXISTS "
                     "dev_port_id_b INTEGER UNIQUE REFERENCES device_ports(id) ON DELETE CASCADE"
                 ))
+                conn.execute(text(
+                    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS room VARCHAR(100)"
+                ))
                 # seed default settings from env vars on first run
                 defaults = {
                     "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),

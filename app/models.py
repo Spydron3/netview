@@ -25,6 +25,7 @@ class Device(Base):
     is_virtual  = Column(Boolean, default=False, nullable=False, server_default="false")
     parent_id   = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True)
     is_wireless = Column(Boolean, default=False, nullable=False, server_default="false")
+    room        = Column(String(100), nullable=True)
 
 
 class Setting(Base):
