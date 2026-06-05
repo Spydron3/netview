@@ -207,6 +207,58 @@
         <p class="setting-hint">Scan the top 100 ports on each live host. Disabling makes scans faster.</p>
       </div>
 
+      <div class="setting-section-header">Email Notifications</div>
+
+      <div class="setting-row">
+        <label class="toggle-row">
+          <input id="s-notify-new" type="checkbox" onchange="toggleSmtpFields()" />
+          <span>Notify on new device discovered</span>
+        </label>
+        <p class="setting-hint">Send an email when a previously unseen device appears on the network.</p>
+      </div>
+
+      <div id="smtp-fields">
+        <div class="setting-row">
+          <label for="s-smtp-host">SMTP host</label>
+          <input id="s-smtp-host" type="text" placeholder="smtp.example.com" />
+        </div>
+        <div class="setting-row">
+          <label for="s-smtp-port">SMTP port</label>
+          <div class="input-with-unit">
+            <input id="s-smtp-port" type="number" min="1" max="65535" placeholder="587" style="width:80px" />
+            <span style="font-size:11px;opacity:.6">465 = SSL · 587 = STARTTLS · 25 = plain</span>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label class="toggle-row">
+            <input id="s-smtp-tls" type="checkbox" />
+            <span>Use STARTTLS</span>
+          </label>
+          <p class="setting-hint">Enable for port 587. Ignored when using port 465 (always SSL).</p>
+        </div>
+        <div class="setting-row">
+          <label for="s-smtp-user">Username</label>
+          <input id="s-smtp-user" type="text" placeholder="user@example.com" autocomplete="username" />
+        </div>
+        <div class="setting-row">
+          <label for="s-smtp-pass">Password</label>
+          <input id="s-smtp-pass" type="password" placeholder="••••••••" autocomplete="current-password" />
+        </div>
+        <div class="setting-row">
+          <label for="s-smtp-from">From address</label>
+          <input id="s-smtp-from" type="email" placeholder="netview@example.com" />
+          <p class="setting-hint">Leave empty to use the username.</p>
+        </div>
+        <div class="setting-row">
+          <label for="s-smtp-to">Recipient</label>
+          <input id="s-smtp-to" type="email" placeholder="admin@example.com" />
+        </div>
+        <div class="setting-row">
+          <button class="btn btn-sm btn-ghost" onclick="sendTestEmail()">Send test email</button>
+          <span id="s-test-msg" class="settings-msg" style="margin-left:8px"></span>
+        </div>
+      </div>
+
     </div>
     <div class="modal-footer">
       <span id="settings-msg" class="settings-msg"></span>

@@ -26,14 +26,28 @@ function switchTab(name) {
 async function openSettings() {
   try {
     const s = await apiFetch('/api/settings');
-    el('s-interval').value    = Math.round(parseInt(s.scan_interval || '300') / 60);
-    el('s-network').value     = s.network_range || '';
-    el('s-port-scan').checked = (s.port_scan_enabled || 'true') === 'true';
-    el('settings-msg').textContent = '';
+    el('s-interval').value      = Math.round(parseInt(s.scan_interval || '300') / 60);
+    el('s-network').value       = s.network_range || '';
+    el('s-port-scan').checked   = (s.port_scan_enabled || 'true') === 'true';
+    el('s-notify-new').checked  = s.notify_new_device === 'true';
+    el('s-smtp-host').value     = s.smtp_host || '';
+    el('s-smtp-port').value     = s.smtp_port || '587';
+    el('s-smtp-tls').checked    = (s.smtp_tls ?? 'true') === 'true';
+    el('s-smtp-user').value     = s.smtp_user || '';
+    el('s-smtp-pass').value     = s.smtp_password || '';
+    el('s-smtp-from').value     = s.smtp_from || '';
+    el('s-smtp-to').value       = s.smtp_to || '';
+    el('settings-msg').textContent  = '';
+    el('s-test-msg').textContent    = '';
+    toggleSmtpFields();
   } catch (e) {
     console.error('loadSettings:', e);
   }
   el('settings-modal').classList.remove('hidden');
+}
+
+function toggleSmtpFields() {
+  el('smtp-fields').style.display = el('s-notify-new').checked ? '' : 'none';
 }
 
 function closeSettings() {
@@ -54,12 +68,34 @@ async function saveSettings() {
         scan_interval:      minutes * 60,
         port_scan_enabled:  el('s-port-scan').checked,
         network_range:      el('s-network').value.trim(),
+        notify_new_device:  el('s-notify-new').checked,
+        smtp_host:          el('s-smtp-host').value.trim(),
+        smtp_port:          parseInt(el('s-smtp-port').value) || 587,
+        smtp_tls:           el('s-smtp-tls').checked,
+        smtp_user:          el('s-smtp-user').value.trim(),
+        smtp_password:      el('s-smtp-pass').value,
+        smtp_from:          el('s-smtp-from').value.trim(),
+        smtp_to:            el('s-smtp-to').value.trim(),
       }),
     });
     showSettingsMsg('Saved.');
     setTimeout(closeSettings, 800);
   } catch (e) {
     showSettingsMsg('Failed to save.', true);
+  }
+}
+
+async function sendTestEmail() {
+  const msg = el('s-test-msg');
+  msg.textContent = 'Sending…';
+  msg.style.color = '';
+  try {
+    await apiFetch('/api/settings/test-email', { method: 'POST' });
+    msg.textContent = 'Sent!';
+    msg.style.color = 'var(--green)';
+  } catch (e) {
+    msg.textContent = e.message || 'Failed.';
+    msg.style.color = 'var(--red)';
   }
 }
 

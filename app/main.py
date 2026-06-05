@@ -1,8 +1,10 @@
 import logging
 import os
+import smtplib
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
+from email.message import EmailMessage
 
 import sqlalchemy as sa
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -36,6 +38,52 @@ def _norm_mac(mac: str | None) -> str | None:
     return ":".join(digits[i:i+2] for i in range(0, 12, 2))
 
 
+def _send_new_device_email(new_devices: list[dict]) -> None:
+    host     = get_setting("smtp_host", "")
+    port     = int(get_setting("smtp_port", "587") or 587)
+    user     = get_setting("smtp_user", "")
+    password = get_setting("smtp_password", "")
+    from_    = get_setting("smtp_from", "") or user or "netview@localhost"
+    to_      = get_setting("smtp_to", "")
+    tls      = get_setting("smtp_tls", "true").lower() == "true"
+
+    if not host or not to_:
+        raise ValueError("smtp_host and smtp_to must be configured")
+
+    n = len(new_devices)
+    subject = f"Netview: {n} new device{'s' if n != 1 else ''} discovered"
+    lines = [f"{n} new device{'s' if n != 1 else ''} discovered on your network:\n"]
+    for d in new_devices:
+        lines.append(f"  IP:       {d.get('ip_address', '—')}")
+        if d.get("hostname"):
+            lines.append(f"  Hostname: {d['hostname']}")
+        if d.get("mac_address"):
+            lines.append(f"  MAC:      {d['mac_address']}")
+        if d.get("vendor"):
+            lines.append(f"  Vendor:   {d['vendor']}")
+        lines.append("")
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"]    = from_
+    msg["To"]      = to_
+    msg.set_content("\n".join(lines))
+
+    if port == 465:
+        with smtplib.SMTP_SSL(host, port, timeout=10) as smtp:
+            if user and password:
+                smtp.login(user, password)
+            smtp.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port, timeout=10) as smtp:
+            if tls:
+                smtp.starttls()
+            if user and password:
+                smtp.login(user, password)
+            smtp.send_message(msg)
+    logger.info("New device notification sent to %s (%d device(s))", to_, n)
+
+
 def _run_scan() -> None:
     if not _scan_lock.acquire(blocking=False):
         logger.info("Scan already running — skipping")
@@ -56,6 +104,8 @@ def _run_scan() -> None:
         ps = get_setting("port_scan_enabled", "true").lower() == "true"
         devices, network_range = scan_network(network_range=nr, port_scan=ps)
         now = datetime.utcnow()
+
+        new_devices: list[dict] = []
 
         with get_db() as db:
             db.execute(sa.update(Device).values(is_online=False))
@@ -91,6 +141,7 @@ def _run_scan() -> None:
                             scan_count=1,
                         )
                     )
+                    new_devices.append(d)
 
             online = len([d for d in devices if d["is_online"]])
             finished = datetime.utcnow()
@@ -106,6 +157,12 @@ def _run_scan() -> None:
                     duration_seconds=(finished - _scan_state["started_at"]).total_seconds(),
                 )
             )
+
+        if new_devices and get_setting("notify_new_device", "false").lower() == "true":
+            threading.Thread(
+                target=lambda: _send_new_device_email(new_devices),
+                daemon=True, name="email-notify",
+            ).start()
 
     except Exception as exc:
         logger.exception("Scan failed")
@@ -352,6 +409,14 @@ class SettingsUpdate(BaseModel):
     scan_interval: int | None = None
     port_scan_enabled: bool | None = None
     network_range: str | None = None
+    notify_new_device: bool | None = None
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_to: str | None = None
+    smtp_tls: bool | None = None
 
 
 @app.get("/api/settings")
@@ -375,6 +440,35 @@ def api_put_settings(body: SettingsUpdate):
     if body.network_range is not None:
         set_setting("network_range", body.network_range.strip())
 
+    if body.notify_new_device is not None:
+        set_setting("notify_new_device", "true" if body.notify_new_device else "false")
+
+    str_fields = ("smtp_host", "smtp_user", "smtp_password", "smtp_from", "smtp_to")
+    for field in str_fields:
+        val = getattr(body, field)
+        if val is not None:
+            set_setting(field, val.strip())
+
+    if body.smtp_port is not None:
+        set_setting("smtp_port", str(body.smtp_port))
+
+    if body.smtp_tls is not None:
+        set_setting("smtp_tls", "true" if body.smtp_tls else "false")
+
+    return {"status": "ok"}
+
+
+@app.post("/api/settings/test-email")
+def api_test_email():
+    try:
+        _send_new_device_email([{
+            "ip_address": "192.168.1.1",
+            "hostname": "test-device.local",
+            "mac_address": "aa:bb:cc:dd:ee:ff",
+            "vendor": "Test (Netview configuration check)",
+        }])
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
     return {"status": "ok"}
 
 

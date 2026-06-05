@@ -201,6 +201,14 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                     "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),
                     "port_scan_enabled": os.environ.get("PORT_SCAN_ENABLED", "true"),
                     "network_range": os.environ.get("NETWORK_RANGE", ""),
+                    "notify_new_device": "false",
+                    "smtp_host": os.environ.get("SMTP_HOST", ""),
+                    "smtp_port": os.environ.get("SMTP_PORT", "587"),
+                    "smtp_user": os.environ.get("SMTP_USER", ""),
+                    "smtp_password": os.environ.get("SMTP_PASSWORD", ""),
+                    "smtp_from": os.environ.get("SMTP_FROM", ""),
+                    "smtp_to": os.environ.get("SMTP_TO", ""),
+                    "smtp_tls": os.environ.get("SMTP_TLS", "true"),
                 }
                 for key, value in defaults.items():
                     conn.execute(text(

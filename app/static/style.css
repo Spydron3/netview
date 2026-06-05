@@ -425,8 +425,23 @@ tr:hover td { background: var(--surface2); }
 .input-with-unit { display: flex; align-items: center; gap: 8px; }
 .input-with-unit span { font-size: 13px; color: var(--muted); white-space: nowrap; }
 
+.setting-section-header {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+#smtp-fields { display: none; }
+
 .modal-body input[type="number"],
-.modal-body input[type="text"] {
+.modal-body input[type="text"],
+.modal-body input[type="email"],
+.modal-body input[type="password"] {
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -437,6 +452,8 @@ tr:hover td { background: var(--surface2); }
   width: 100%;
 }
 .modal-body input[type="number"] { width: 90px; }
+.modal-body input[type="email"],
+.modal-body input[type="password"] { width: 100%; }
 .modal-body input:focus { border-color: var(--blue); }
 
 .toggle-row { display: flex; align-items: center; gap: 8px; cursor: pointer; }
