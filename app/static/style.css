@@ -409,7 +409,7 @@ tr:hover td { background: var(--surface2); }
 }
 .modal-close:hover { color: var(--text); background: var(--surface2); }
 
-.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+.modal-body { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
 
 .setting-row { display: flex; flex-direction: column; gap: 6px; }
 .setting-row > label { font-size: 13px; font-weight: 500; color: var(--text); }
@@ -425,15 +425,39 @@ tr:hover td { background: var(--surface2); }
 .input-with-unit { display: flex; align-items: center; gap: 8px; }
 .input-with-unit span { font-size: 13px; color: var(--muted); white-space: nowrap; }
 
-.setting-section-header {
+.setting-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.setting-section > summary {
+  list-style: none;
+  padding: 10px 14px;
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .06em;
   color: var(--muted);
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--border);
-  margin-top: 4px;
+  background: var(--surface2);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+.setting-section > summary::-webkit-details-marker { display: none; }
+.setting-section > summary::after {
+  content: '›';
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 0.15s;
+}
+.setting-section[open] > summary::after { transform: rotate(90deg); }
+.setting-section-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 #smtp-fields { display: none; }
