@@ -40,19 +40,24 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                 conn.execute(text(
                     "ALTER TABLE devices ADD COLUMN IF NOT EXISTS name VARCHAR(255)"
                 ))
-                # remove legacy SNMP columns from switches (idempotent)
-                for col in ("community", "enabled", "last_polled", "status"):
-                    conn.execute(text(
-                        f"ALTER TABLE switches DROP COLUMN IF EXISTS {col}"
-                    ))
-                # allow MAC-only unmanaged switches
-                conn.execute(text(
-                    "ALTER TABLE switches ALTER COLUMN ip_address DROP NOT NULL"
-                ))
-                conn.execute(text(
-                    "ALTER TABLE switches ADD COLUMN IF NOT EXISTS "
-                    "mac_address VARCHAR(17) UNIQUE"
-                ))
+                # legacy switches-table migrations (no-op if table already gone)
+                conn.execute(text("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_name = 'switches'
+                        ) THEN
+                            ALTER TABLE switches DROP COLUMN IF EXISTS community;
+                            ALTER TABLE switches DROP COLUMN IF EXISTS enabled;
+                            ALTER TABLE switches DROP COLUMN IF EXISTS last_polled;
+                            ALTER TABLE switches DROP COLUMN IF EXISTS status;
+                            ALTER TABLE switches ALTER COLUMN ip_address DROP NOT NULL;
+                            ALTER TABLE switches ADD COLUMN IF NOT EXISTS
+                                mac_address VARCHAR(17) UNIQUE;
+                        END IF;
+                    END $$
+                """))
                 # drop legacy topology_links table
                 conn.execute(text("DROP TABLE IF EXISTS topology_links"))
                 # drop legacy device_id column from switch_ports (moved to port_links)
