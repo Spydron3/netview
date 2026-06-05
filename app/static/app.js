@@ -911,28 +911,29 @@ function renderTopology(data) {
     e.midOffset = total === 1 ? 0 : (idx - (total + 1) / 2) * 18;
   });
 
-  // Pin nodes that have saved positions; track which are new (need auto-save)
-  nodes.forEach(d => {
+  // Pin all nodes immediately — saved positions or circular default around center
+  const _newNodes = [];
+  nodes.forEach((d, i) => {
     if (d.x !== undefined && d.y !== undefined) {
       d.fx = d.x;
       d.fy = d.y;
       d._pinned = true;
+    } else {
+      const angle = (i / Math.max(nodes.length, 1)) * 2 * Math.PI;
+      d.x = W / 2 + 120 * Math.cos(angle);
+      d.y = H / 2 + 120 * Math.sin(angle);
+      d.fx = d.x;
+      d.fy = d.y;
+      d._pinned = true;
+      _newNodes.push(d);
     }
   });
+  // Save default positions for new nodes before simulation starts
+  _newNodes.forEach(d => saveTopoPosition(d.id, d.x, d.y));
 
   if (topoSimulation) topoSimulation.stop();
   topoSimulation = d3.forceSimulation(nodes)
-    .force('link',      d3.forceLink(edges).id(d => d.id)
-                          .distance(d => d.type === 'switch_link' ? 220 : 130))
-    .force('charge',    d3.forceManyBody().strength(d => d.type === 'switch' ? -700 : -280))
-    .force('center',    d3.forceCenter(W / 2, H / 2))
-    .force('collision', d3.forceCollide(d => {
-        if (d.type === 'device' && (d.virtual_children || []).length > 0) {
-          const h = 12 + d.virtual_children.length * 24;
-          return h / 2 + 16;
-        }
-        return 46;
-      }));
+    .force('link', d3.forceLink(edges).id(d => d.id).strength(0));
 
   const edgeG = g.append('g').attr('class', 'topo-edges');
   const edge = edgeG.selectAll('path').data(edges).join('path')
@@ -1009,17 +1010,6 @@ function renderTopology(data) {
       return 33;
     })
     .text(d => _truncate(d.label, 16));
-
-  topoSimulation.on('end', () => {
-    nodes.forEach(d => {
-      if (!d._pinned) {
-        d.fx = d.x;
-        d.fy = d.y;
-        d._pinned = true;
-        saveTopoPosition(d.id, d.x, d.y);
-      }
-    });
-  });
 
   topoSimulation.on('tick', () => {
     edge.attr('d', d => {

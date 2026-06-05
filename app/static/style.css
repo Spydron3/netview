@@ -933,6 +933,7 @@ tr:hover td { background: var(--surface2); }
 .vmchild-label {
   font-size: 9px;
   fill: var(--muted);
+  text-anchor: start;
 }
 
 /* ── node detail: virtual machines section ──────────────────────────────────── */
