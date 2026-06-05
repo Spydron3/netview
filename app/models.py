@@ -50,22 +50,18 @@ class SwitchPort(Base):
     speed = Column(String(10), nullable=False, default="1G")
 
 
-class PortConnection(Base):
-    __tablename__ = "port_connections"
+class PortLink(Base):
+    """One row per cable. port_a is always a switch port.
+    - device connection:   device_id set, port_b_id NULL
+    - switch-to-switch:    port_b_id set, device_id NULL
+    Both port_a_id and port_b_id are UNIQUE so each port appears in at most one link.
+    """
+    __tablename__ = "port_links"
 
-    id             = Column(Integer, primary_key=True, autoincrement=True)
-    switch_port_id = Column(Integer, ForeignKey("switch_ports.id", ondelete="CASCADE"), nullable=False, unique=True)
-    device_id      = Column(Integer, ForeignKey("devices.id",      ondelete="CASCADE"), nullable=False)
-
-
-class SwitchLink(Base):
-    __tablename__ = "switch_links"
-
-    id          = Column(Integer, primary_key=True, autoincrement=True)
-    switch_a_id = Column(Integer, ForeignKey("switches.id",      ondelete="CASCADE"), nullable=False)
-    port_a_id   = Column(Integer, ForeignKey("switch_ports.id",  ondelete="CASCADE"), nullable=False)
-    switch_b_id = Column(Integer, ForeignKey("switches.id",      ondelete="CASCADE"), nullable=False)
-    port_b_id   = Column(Integer, ForeignKey("switch_ports.id",  ondelete="CASCADE"), nullable=False)
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    port_a_id = Column(Integer, ForeignKey("switch_ports.id", ondelete="CASCADE"), nullable=False, unique=True)
+    device_id = Column(Integer, ForeignKey("devices.id",      ondelete="CASCADE"), nullable=True)
+    port_b_id = Column(Integer, ForeignKey("switch_ports.id", ondelete="CASCADE"), nullable=True,  unique=True)
 
 
 class ScanRun(Base):

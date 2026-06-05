@@ -55,18 +55,7 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                 ))
                 # drop legacy topology_links table
                 conn.execute(text("DROP TABLE IF EXISTS topology_links"))
-                # migrate switch_ports.device_id → port_connections (M:N table)
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS port_connections (
-                        id             SERIAL PRIMARY KEY,
-                        switch_port_id INTEGER NOT NULL UNIQUE
-                            REFERENCES switch_ports(id) ON DELETE CASCADE,
-                        device_id      INTEGER NOT NULL
-                            REFERENCES devices(id) ON DELETE CASCADE
-                    )
-                """))
-                # copy existing assignments if the old column still exists
-                # (DO block defers inner SQL parsing so a missing column is safe)
+                # drop legacy device_id column from switch_ports (moved to port_links)
                 conn.execute(text("""
                     DO $$
                     BEGIN
@@ -74,16 +63,36 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                             SELECT 1 FROM information_schema.columns
                             WHERE table_name='switch_ports' AND column_name='device_id'
                         ) THEN
-                            INSERT INTO port_connections (switch_port_id, device_id)
-                            SELECT id, device_id FROM switch_ports
-                            WHERE device_id IS NOT NULL
-                            ON CONFLICT (switch_port_id) DO NOTHING;
+                            ALTER TABLE switch_ports DROP COLUMN device_id;
                         END IF;
                     END $$
                 """))
-                conn.execute(text(
-                    "ALTER TABLE switch_ports DROP COLUMN IF EXISTS device_id"
-                ))
+                # migrate port_connections + switch_links → unified port_links table
+                conn.execute(text("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_name = 'port_connections'
+                        ) THEN
+                            INSERT INTO port_links (port_a_id, device_id)
+                            SELECT switch_port_id, device_id FROM port_connections
+                            ON CONFLICT (port_a_id) DO NOTHING;
+                            DROP TABLE port_connections;
+                        END IF;
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_name = 'switch_links'
+                        ) THEN
+                            INSERT INTO port_links (port_a_id, port_b_id)
+                            SELECT LEAST(port_a_id, port_b_id),
+                                   GREATEST(port_a_id, port_b_id)
+                            FROM switch_links
+                            ON CONFLICT (port_a_id) DO NOTHING;
+                            DROP TABLE switch_links;
+                        END IF;
+                    END $$
+                """))
                 # seed default settings from env vars on first run
                 defaults = {
                     "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),
