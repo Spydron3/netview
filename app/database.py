@@ -102,22 +102,23 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                 conn.execute(text("""
                     DO $$
                     DECLARE
-                        _dev_id  INTEGER;
-                        _dp_id   INTEGER;
+                        _rec   RECORD;
+                        _dp_id INTEGER;
                     BEGIN
                         IF EXISTS (
                             SELECT 1 FROM information_schema.columns
                             WHERE table_name='port_links' AND column_name='device_id'
                         ) THEN
-                            FOR _dev_id IN (
-                                SELECT DISTINCT device_id FROM port_links WHERE device_id IS NOT NULL
-                            ) LOOP
+                            FOR _rec IN
+                                SELECT id, device_id FROM port_links
+                                WHERE device_id IS NOT NULL AND dev_port_id IS NULL
+                            LOOP
                                 INSERT INTO device_ports (device_id, label)
-                                VALUES (_dev_id, 'eth0')
+                                VALUES (_rec.device_id, 'eth0')
                                 RETURNING id INTO _dp_id;
                                 UPDATE port_links
                                 SET dev_port_id = _dp_id
-                                WHERE device_id = _dev_id AND dev_port_id IS NULL;
+                                WHERE id = _rec.id;
                             END LOOP;
                             ALTER TABLE port_links DROP COLUMN device_id;
                         END IF;
