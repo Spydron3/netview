@@ -641,12 +641,16 @@ def api_topology():
             })
             seen.add(nid)
 
+        # Buffer switch→switch port edges so we can deduplicate them before
+        # adding switch_link edges (which take precedence for the same pair).
+        # Key: frozenset of the two node IDs (direction-independent).
+        sw_port_edges: dict[frozenset, dict] = {}
+
         for port, dev in ports_with_devices:
             src = f"sw_{port.switch_id}"
             if src not in seen:
                 continue
 
-            # Collapse device into its switch node when matched by IP or MAC
             matched_sw = (
                 sw_by_ip.get(dev.ip_address)
                 or sw_by_mac.get((dev.mac_address or "").lower())
@@ -654,7 +658,16 @@ def api_topology():
             if matched_sw:
                 tgt = f"sw_{matched_sw.id}"
                 if src == tgt:
-                    continue  # skip self-loop (switch connected to its own mgmt port)
+                    continue  # self-loop: switch connected to its own mgmt port
+                key = frozenset([src, tgt])
+                if key not in sw_port_edges:
+                    sw_port_edges[key] = {
+                        "source": src, "target": tgt,
+                        "port": port.label or f"Port {port.port_number}",
+                        "port_type": port.port_type,
+                        "speed": port.speed,
+                        "type": "port",
+                    }
             else:
                 tgt = f"dev_{dev.id}"
                 if tgt not in seen:
@@ -666,20 +679,21 @@ def api_topology():
                         "name": dev.name, "is_online": dev.is_online,
                     })
                     seen.add(tgt)
+                edges.append({
+                    "source": src, "target": tgt,
+                    "port": port.label or f"Port {port.port_number}",
+                    "port_type": port.port_type,
+                    "speed": port.speed,
+                    "type": "port",
+                })
 
-            edges.append({
-                "source": src, "target": tgt,
-                "port": port.label or f"Port {port.port_number}",
-                "port_type": port.port_type,
-                "speed": port.speed,
-                "type": "port",
-            })
-
+        sw_link_pairs: set[frozenset] = set()
         for lnk in sw_links:
             src = f"sw_{lnk.switch_a_id}"
             tgt = f"sw_{lnk.switch_b_id}"
             if src not in seen or tgt not in seen:
                 continue
+            sw_link_pairs.add(frozenset([src, tgt]))
             pa = ports_by_id.get(lnk.port_a_id)
             pb = ports_by_id.get(lnk.port_b_id)
             edges.append({
@@ -692,6 +706,11 @@ def api_topology():
                 "speed_b": pb.speed if pb else "",
                 "type": "switch_link",
             })
+
+        # Add switch→switch port edges only where no switch_link covers the pair
+        for key, edge in sw_port_edges.items():
+            if key not in sw_link_pairs:
+                edges.append(edge)
 
     return {"nodes": nodes, "edges": edges}
 
