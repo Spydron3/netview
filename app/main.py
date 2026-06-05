@@ -296,7 +296,8 @@ def api_update_device(device_id: int, body: DeviceUpdate):
         d = db.get(Device, device_id)
         if not d:
             raise HTTPException(status_code=404, detail="Device not found")
-        d.name = body.name.strip() if body.name and body.name.strip() else None
+        if "name" in body.model_fields_set:
+            d.name = body.name.strip() if body.name and body.name.strip() else None
         if "is_switch" in body.model_fields_set:
             d.is_switch = bool(body.is_switch)
         if "is_virtual" in body.model_fields_set:
