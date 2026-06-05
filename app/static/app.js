@@ -476,7 +476,7 @@ function pollScan() {
     try {
       const status = await apiFetch('/api/scan/status');
       await loadStats();
-      await loadDevices();
+      if (!isEditingName()) await loadDevices();
       if (status.running) {
         pollScan();
       } else {
@@ -500,9 +500,15 @@ function setScanRunning(running) {
 
 // ── auto-refresh ──────────────────────────────────────────────────────────────
 
+function isEditingName() {
+  return !!document.querySelector('#device-grid .name-input');
+}
+
 function startAutoRefresh() {
   setInterval(async () => {
-    await Promise.all([loadStats(), loadDevices(), loadAllPorts()]);
+    const tasks = [loadStats(), loadAllPorts()];
+    if (!isEditingName()) tasks.push(loadDevices());
+    await Promise.all(tasks);
   }, 30_000);
 }
 
