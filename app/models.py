@@ -68,6 +68,14 @@ class PortLink(Base):
     port_b_id   = Column(Integer, ForeignKey("switch_ports.id",  ondelete="CASCADE"), nullable=True,  unique=True)
 
 
+class TopologyPosition(Base):
+    __tablename__ = "topology_positions"
+
+    node_id = Column(String(50), primary_key=True)
+    x       = Column(Float, nullable=False)
+    y       = Column(Float, nullable=False)
+
+
 class ScanRun(Base):
     __tablename__ = "scan_runs"
 

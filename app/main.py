@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from database import get_db, get_setting, init_db, set_setting
 from sqlalchemy.orm import aliased as _aliased
-from models import Device, DevicePort, PortLink, ScanRun, Setting, SwitchPort
+from models import Device, DevicePort, PortLink, ScanRun, Setting, SwitchPort, TopologyPosition
 from scanner import get_network_range, scan_network
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -567,6 +567,9 @@ def api_delete_switch(switch_id: int):
         dev = db.get(Device, switch_id)
         if not dev or not dev.is_switch:
             raise HTTPException(status_code=404, detail="Switch not found")
+        pos = db.get(TopologyPosition, f"sw_{switch_id}")
+        if pos:
+            db.delete(pos)
         if dev.ip_address is None and dev.scan_count == 0:
             db.delete(dev)  # purely manual entry — delete device too
         else:
@@ -935,7 +938,41 @@ def api_topology():
                 if kids:
                     node["virtual_children"] = kids
 
+        # Embed saved positions so the frontend can pin nodes immediately
+        saved = {r.node_id: (r.x, r.y) for r in
+                 db.execute(sa.select(TopologyPosition)).scalars().all()}
+        for node in nodes:
+            pos = saved.get(node["id"])
+            if pos:
+                node["x"], node["y"] = pos
+
     return {"nodes": nodes, "edges": edges}
+
+
+# ── topology positions ────────────────────────────────────────────────────────
+
+class TopoPositionUpdate(BaseModel):
+    node_id: str
+    x: float
+    y: float
+
+
+@app.post("/api/topology/positions", status_code=204)
+def api_save_topo_position(body: TopoPositionUpdate):
+    with get_db() as db:
+        row = db.get(TopologyPosition, body.node_id)
+        if row:
+            row.x, row.y = body.x, body.y
+        else:
+            db.add(TopologyPosition(node_id=body.node_id, x=body.x, y=body.y))
+
+
+@app.delete("/api/topology/positions/{node_id}", status_code=204)
+def api_delete_topo_position(node_id: str):
+    with get_db() as db:
+        row = db.get(TopologyPosition, node_id)
+        if row:
+            db.delete(row)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

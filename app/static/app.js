@@ -862,6 +862,14 @@ async function loadTopology() {
   } catch (e) { console.error('loadTopology:', e); }
 }
 
+function saveTopoPosition(nodeId, x, y) {
+  apiFetch('/api/topology/positions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ node_id: nodeId, x: Math.round(x), y: Math.round(y) }),
+  }).catch(e => console.error('saveTopoPosition:', e));
+}
+
 function renderTopology(data) {
   const wrap  = el('topo-graph-wrap');
   const svgEl = el('topo-svg');
@@ -903,6 +911,15 @@ function renderTopology(data) {
     e.midOffset = total === 1 ? 0 : (idx - (total + 1) / 2) * 18;
   });
 
+  // Pin nodes that have saved positions; track which are new (need auto-save)
+  nodes.forEach(d => {
+    if (d.x !== undefined && d.y !== undefined) {
+      d.fx = d.x;
+      d.fy = d.y;
+      d._pinned = true;
+    }
+  });
+
   if (topoSimulation) topoSimulation.stop();
   topoSimulation = d3.forceSimulation(nodes)
     .force('link',      d3.forceLink(edges).id(d => d.id)
@@ -911,8 +928,7 @@ function renderTopology(data) {
     .force('center',    d3.forceCenter(W / 2, H / 2))
     .force('collision', d3.forceCollide(d => {
         if (d.type === 'device' && (d.virtual_children || []).length > 0) {
-          const rowH = 22;
-          const h = 14 + d.virtual_children.length * rowH;
+          const h = 12 + d.virtual_children.length * 24;
           return h / 2 + 16;
         }
         return 46;
@@ -934,9 +950,13 @@ function renderTopology(data) {
       return cls;
     })
     .call(d3.drag()
-      .on('start', (ev, d) => { if (!ev.active) topoSimulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-      .on('drag',  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
-      .on('end',   (ev, d) => { if (!ev.active) topoSimulation.alphaTarget(0); d.fx = null; d.fy = null; })
+      .on('start', (ev, d) => { d.fx = d.x; d.fy = d.y; })
+      .on('drag',  (ev, d) => { d.fx = ev.x; d.fy = ev.y; topoSimulation.alpha(0.1).restart(); })
+      .on('end',   (ev, d) => {
+        topoSimulation.alphaTarget(0);
+        d._pinned = true;
+        saveTopoPosition(d.id, d.x, d.y);
+      })
     )
     .on('click', (ev, d) => { ev.stopPropagation(); showNodeDetail(d); });
 
@@ -957,39 +977,49 @@ function renderTopology(data) {
   node.filter(d => d.type === 'device' && (d.virtual_children || []).length > 0)
     .each(function(d) {
       const n    = d.virtual_children.length;
-      const rowH = 22;
-      const w    = 134;
-      const h    = 10 + n * rowH + 4;
+      const rowH = 24;
+      const w    = 150;
+      const h    = 12 + n * rowH;
       const g2   = d3.select(this);
-      d._vmH = h;
       g2.append('rect')
         .attr('width', w).attr('height', h)
         .attr('x', -w / 2).attr('y', -h / 2)
         .attr('rx', 6).attr('class', 'vmhost-rect');
       d.virtual_children.forEach((child, i) => {
-        const cy = -h / 2 + 10 + i * rowH + rowH / 2;
+        const cy = -h / 2 + 12 + i * rowH + rowH / 2 - 2;
         const cg = g2.append('g').attr('transform', `translate(0,${cy})`);
         cg.append('circle')
           .attr('cx', -w / 2 + 14).attr('r', 6)
           .attr('class', `vmchild-dot ${child.is_online ? 'vm-on' : 'vm-off'}`);
         cg.append('text')
-          .attr('x', -w / 2 + 26).attr('dy', '0.35em')
+          .attr('x', -w / 2 + 30).attr('dy', '0.35em')
           .attr('text-anchor', 'start')
           .attr('class', 'vmchild-label')
-          .text(_truncate(child.label, 14));
+          .text(_truncate(child.label, 15));
       });
     });
 
   node.append('text').attr('dy', d => {
       if (d.type === 'switch') return 28;
       if ((d.virtual_children || []).length > 0) {
-        const rowH = 22;
-        const h = 10 + d.virtual_children.length * rowH + 4;
+        const rowH = 24;
+        const h = 12 + d.virtual_children.length * rowH;
         return h / 2 + 14;
       }
       return 33;
     })
     .text(d => _truncate(d.label, 16));
+
+  topoSimulation.on('end', () => {
+    nodes.forEach(d => {
+      if (!d._pinned) {
+        d.fx = d.x;
+        d.fy = d.y;
+        d._pinned = true;
+        saveTopoPosition(d.id, d.x, d.y);
+      }
+    });
+  });
 
   topoSimulation.on('tick', () => {
     edge.attr('d', d => {
