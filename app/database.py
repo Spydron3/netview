@@ -218,6 +218,14 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                     "ALTER TABLE port_links ADD COLUMN IF NOT EXISTS "
                     "dev_port_id_b INTEGER UNIQUE REFERENCES device_ports(id) ON DELETE CASCADE"
                 ))
+                # remove fully-orphaned port_links (all four FK columns null)
+                conn.execute(text("""
+                    DELETE FROM port_links
+                    WHERE port_a_id IS NULL
+                      AND port_b_id IS NULL
+                      AND dev_port_id IS NULL
+                      AND dev_port_id_b IS NULL
+                """))
                 # rooms table is created by create_all; add FK to devices
                 conn.execute(text(
                     "ALTER TABLE devices ADD COLUMN IF NOT EXISTS "

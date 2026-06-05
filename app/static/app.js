@@ -9,6 +9,8 @@ let currentTab = 'devices';
 // ── bootstrap ─────────────────────────────────────────────────────────────────
 
 (async function init() {
+  const savedOffline = localStorage.getItem('showOffline');
+  if (savedOffline !== null) el('show-offline').checked = savedOffline === 'true';
   await Promise.all([loadRooms(), loadStats(), loadHistory(), loadAllPorts()]);
   await loadDevices();
   startAutoRefresh();
@@ -180,6 +182,7 @@ async function loadHistory() {
 function applyFilter() {
   const q    = el('search').value.toLowerCase();
   const showOffline = el('show-offline').checked;
+  localStorage.setItem('showOffline', showOffline);
 
   const filtered = allDevices.filter(d => {
     if (!showOffline && !d.is_online) return false;
@@ -813,7 +816,7 @@ function renderPortRow(port) {
 
   const portLabel = JSON.stringify(port.label || ('Port ' + port.port_number));
   const devCell = port.link_id
-    ? `<span>${esc(port.device_label)}</span> <button class="btn-xs" onclick="disconnectPort(${port.link_id})" title="Disconnect">✕</button>`
+    ? `<span>${esc(port.device_label || '?')}</span> <button class="btn-xs" onclick="disconnectPort(${port.link_id})" title="Disconnect">✕</button>`
     : `<button class="btn-xs btn-ghost" onclick="showPortConnect(${port.id}, ${esc(portLabel)})">+ Connect</button>`;
 
   return `<tr data-port-id="${port.id}">

@@ -513,7 +513,7 @@ def api_device_connections(device_id: int):
             result.append({
                 "link_id": lnk.id,
                 "other_device_id": other.id if other else None,
-                "other_device_label": (other.name or other.hostname or other.ip_address) if other else "?",
+                "other_device_label": _dev_label(other) if other else "?",
                 "other_device_is_switch": other.is_switch if other else False,
                 "port_label": None, "port_type": None, "speed": None,
             })
@@ -532,7 +532,7 @@ def api_device_connections(device_id: int):
             result.append({
                 "link_id": lnk.id,
                 "other_device_id": other.id if other else None,
-                "other_device_label": (other.name or other.hostname or other.ip_address) if other else "?",
+                "other_device_label": _dev_label(other) if other else "?",
                 "other_device_is_switch": other.is_switch if other else False,
                 "port_label": None, "port_type": None, "speed": None,
             })
@@ -1056,7 +1056,7 @@ def api_topology():
                 if tgt not in seen:
                     nodes.append({
                         "id": tgt, "type": "device",
-                        "label": dev.name or dev.hostname or dev.ip_address,
+                        "label": _dev_label(dev),
                         "ip": dev.ip_address, "mac": dev.mac_address,
                         "hostname": dev.hostname, "vendor": dev.vendor,
                         "name": dev.name, "is_online": dev.is_online,
@@ -1120,7 +1120,7 @@ def api_topology():
                 if _nid not in seen:
                     nodes.append({
                         "id": _nid, "type": "device",
-                        "label": _d.name or _d.hostname or _d.ip_address or f"Device {_d.id}",
+                        "label": _dev_label(_d),
                         "ip": _d.ip_address, "mac": _d.mac_address,
                         "hostname": _d.hostname, "vendor": _d.vendor,
                         "name": _d.name, "is_online": _d.is_online,
@@ -1141,7 +1141,7 @@ def api_topology():
             if nid not in seen:
                 nodes.append({
                     "id": nid, "type": "device",
-                    "label": dev.name or dev.hostname or dev.ip_address,
+                    "label": _dev_label(dev),
                     "ip": dev.ip_address, "mac": dev.mac_address,
                     "hostname": dev.hostname, "vendor": dev.vendor,
                     "name": dev.name, "is_online": dev.is_online,
@@ -1160,7 +1160,7 @@ def api_topology():
         for vd in virtual_devs:
             vchildren.setdefault(vd.parent_id, []).append({
                 "id": vd.id,
-                "label": vd.name or vd.hostname or vd.ip_address or f"VM {vd.id}",
+                "label": _dev_label(vd),
                 "ip": vd.ip_address,
                 "is_online": vd.is_online,
             })
@@ -1224,6 +1224,10 @@ def _sw_label(sw: Device) -> str:
     return sw.name or sw.ip_address or sw.mac_address or f"Switch {sw.id}"
 
 
+def _dev_label(d: Device) -> str:
+    return d.name or d.hostname or d.ip_address or d.mac_address or f"Device {d.id}"
+
+
 def _port_to_dict(p: SwitchPort, sw: Device, dev: Device | None, link_id: int | None = None) -> dict:
     return {
         "id": p.id,
@@ -1236,7 +1240,7 @@ def _port_to_dict(p: SwitchPort, sw: Device, dev: Device | None, link_id: int | 
         "speed": p.speed,
         "link_id": link_id,
         "device_id": dev.id if dev else None,
-        "device_label": (dev.name or dev.hostname or dev.ip_address) if dev else None,
+        "device_label": _dev_label(dev) if dev else None,
         "device_is_switch": dev.is_switch if dev else False,
     }
 
