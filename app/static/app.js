@@ -187,6 +187,10 @@ function renderDevices(devices) {
       </button>
       <div class="device-virtual-row">
         <label class="device-virtual-label">
+          <input type="checkbox" ${d.is_wireless ? 'checked' : ''} onchange="toggleWireless(${d.id}, this.checked)" />
+          Wireless
+        </label>
+        <label class="device-virtual-label">
           <input type="checkbox" ${d.is_virtual ? 'checked' : ''} onchange="toggleVirtual(${d.id}, this.checked)" />
           Virtual
         </label>
@@ -200,7 +204,7 @@ function renderDevices(devices) {
         ` : ''}
       </div>
       <div class="device-footer">
-        ${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
+        ${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
         ${d.is_online
           ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}`
           : `Offline · last seen ${timeAgo(new Date(d.last_seen + 'Z'))}`}
@@ -210,6 +214,15 @@ function renderDevices(devices) {
 }
 
 // ── virtual device helpers ────────────────────────────────────────────────────
+
+async function toggleWireless(deviceId, isWireless) {
+  await apiFetch(`/api/devices/${deviceId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_wireless: isWireless }),
+  });
+  await loadDevices();
+}
 
 async function toggleVirtual(deviceId, isVirtual) {
   await apiFetch(`/api/devices/${deviceId}`, {
@@ -828,6 +841,7 @@ function renderTopology(data) {
       let cls = `topo-node topo-node-${d.type}`;
       if (d.type === 'device' && d.is_online === false) cls += ' topo-node-offline';
       if (d.type === 'device' && (d.virtual_children || []).length > 0) cls += ' topo-node-vmhost';
+      if (d.type === 'device' && d.is_wireless) cls += ' topo-node-wireless';
       return cls;
     })
     .call(d3.drag()
@@ -843,6 +857,12 @@ function renderTopology(data) {
   // Regular device nodes (no virtual children)
   node.filter(d => d.type === 'device' && !(d.virtual_children || []).length)
     .append('circle').attr('r', 20);
+
+  // WiFi arc on wireless nodes
+  node.filter(d => d.type === 'device' && d.is_wireless && !(d.virtual_children || []).length)
+    .append('path')
+    .attr('class', 'wifi-arc')
+    .attr('d', 'M-9,-16 A15,15 0 0,1 9,-16 M-5,-20 A10,10 0 0,1 5,-20 M-1,-24 A5,5 0 0,1 1,-24');
 
   // VM host nodes: rounded rect containing child circles
   node.filter(d => d.type === 'device' && (d.virtual_children || []).length > 0)

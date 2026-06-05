@@ -226,6 +226,7 @@ class DeviceUpdate(BaseModel):
     name: str | None = None
     is_virtual: bool | None = None
     parent_id: int | None = None
+    is_wireless: bool | None = None
 
 
 @app.patch("/api/devices/{device_id}")
@@ -239,6 +240,8 @@ def api_update_device(device_id: int, body: DeviceUpdate):
             d.is_virtual = bool(body.is_virtual)
             if not d.is_virtual:
                 d.parent_id = None
+        if "is_wireless" in body.model_fields_set:
+            d.is_wireless = bool(body.is_wireless)
         if "parent_id" in body.model_fields_set:
             if body.parent_id is not None:
                 parent = db.get(Device, body.parent_id)
@@ -717,6 +720,7 @@ def api_topology():
                         "ip": dev.ip_address, "mac": dev.mac_address,
                         "hostname": dev.hostname, "vendor": dev.vendor,
                         "name": dev.name, "is_online": dev.is_online,
+                        "is_wireless": dev.is_wireless,
                     })
                     seen.add(tgt)
                 edges.append({
@@ -755,6 +759,25 @@ def api_topology():
         for key, edge in sw_port_edges.items():
             if key not in sw_link_pairs:
                 edges.append(edge)
+
+        # Always include wireless devices even without a switch port connection
+        wireless_devs = db.execute(
+            sa.select(Device).where(
+                sa.and_(Device.is_wireless == True, Device.is_virtual == False)  # noqa: E712
+            )
+        ).scalars().all()
+        for dev in wireless_devs:
+            nid = f"dev_{dev.id}"
+            if nid not in seen:
+                nodes.append({
+                    "id": nid, "type": "device",
+                    "label": dev.name or dev.hostname or dev.ip_address,
+                    "ip": dev.ip_address, "mac": dev.mac_address,
+                    "hostname": dev.hostname, "vendor": dev.vendor,
+                    "name": dev.name, "is_online": dev.is_online,
+                    "is_wireless": True,
+                })
+                seen.add(nid)
 
         # Attach virtual devices as children of their parent device node
         virtual_devs = db.execute(
@@ -828,6 +851,7 @@ def _device_to_dict(d: Device, ports: list | None = None) -> dict:
         "scan_count": d.scan_count,
         "is_virtual": d.is_virtual,
         "parent_id": d.parent_id,
+        "is_wireless": d.is_wireless,
         "switch_ports": [
             {
                 "id": p.id,

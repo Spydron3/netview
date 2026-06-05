@@ -93,7 +93,7 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                         END IF;
                     END $$
                 """))
-                # virtual device fields
+                # virtual / wireless device fields
                 conn.execute(text(
                     "ALTER TABLE devices ADD COLUMN IF NOT EXISTS "
                     "is_virtual BOOLEAN NOT NULL DEFAULT FALSE"
@@ -101,6 +101,10 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                 conn.execute(text(
                     "ALTER TABLE devices ADD COLUMN IF NOT EXISTS "
                     "parent_id INTEGER REFERENCES devices(id) ON DELETE SET NULL"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS "
+                    "is_wireless BOOLEAN NOT NULL DEFAULT FALSE"
                 ))
                 # seed default settings from env vars on first run
                 defaults = {

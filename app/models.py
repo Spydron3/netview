@@ -21,8 +21,9 @@ class Device(Base):
     first_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
     last_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
     scan_count = Column(Integer, default=1, nullable=False)
-    is_virtual = Column(Boolean, default=False, nullable=False, server_default="false")
-    parent_id  = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True)
+    is_virtual  = Column(Boolean, default=False, nullable=False, server_default="false")
+    parent_id   = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True)
+    is_wireless = Column(Boolean, default=False, nullable=False, server_default="false")
 
 
 class Setting(Base):
