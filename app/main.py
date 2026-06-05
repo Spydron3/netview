@@ -12,7 +12,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from database import get_db, get_setting, init_db, set_setting
-from models import Device, DevicePort, PortLink, ScanRun, Setting, Switch, SwitchPort
+from sqlalchemy.orm import aliased as _aliased
+from models import Device, DevicePort, PortLink, ScanRun, Setting, SwitchPort
 from scanner import get_network_range, scan_network
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -181,14 +182,15 @@ def api_stats():
 # ── devices ───────────────────────────────────────────────────────────────────
 
 def _device_ports(db, device_id: int) -> list:
-    """Returns list of (SwitchPort, Switch, DevicePort) for the given device."""
+    """Returns list of (SwitchPort, Device[switch], DevicePort) for the given device."""
+    SwDev = _aliased(Device)
     return db.execute(
-        sa.select(SwitchPort, Switch, DevicePort)
+        sa.select(SwitchPort, SwDev, DevicePort)
         .join(PortLink, PortLink.port_a_id == SwitchPort.id)
         .join(DevicePort, DevicePort.id == PortLink.dev_port_id)
-        .join(Switch, Switch.id == SwitchPort.switch_id)
+        .join(SwDev, SwDev.id == SwitchPort.switch_id)
         .where(DevicePort.device_id == device_id)
-        .order_by(Switch.ip_address, SwitchPort.port_number)
+        .order_by(SwDev.ip_address, SwitchPort.port_number)
     ).all()
 
 
@@ -198,14 +200,15 @@ def api_devices():
         from sqlalchemy.dialects.postgresql import INET
         devices = db.execute(
             sa.select(Device)
-            .order_by(Device.is_online.desc(), sa.cast(Device.ip_address, INET))
+            .order_by(Device.is_online.desc(), sa.nullslast(sa.cast(Device.ip_address, INET)))
         ).scalars().all()
         # fetch all connections in one query and group by device
+        SwDev = _aliased(Device)
         conn_rows = db.execute(
-            sa.select(SwitchPort, Switch, DevicePort)
+            sa.select(SwitchPort, SwDev, DevicePort)
             .join(PortLink, PortLink.port_a_id == SwitchPort.id)
             .join(DevicePort, DevicePort.id == PortLink.dev_port_id)
-            .join(Switch, Switch.id == SwitchPort.switch_id)
+            .join(SwDev, SwDev.id == SwitchPort.switch_id)
         ).all()
         conns: dict[int, list] = {}
         for sp, sw, dp in conn_rows:
@@ -224,6 +227,7 @@ def api_device(device_id: int):
 
 class DeviceUpdate(BaseModel):
     name: str | None = None
+    is_switch: bool | None = None
     is_virtual: bool | None = None
     parent_id: int | None = None
     is_wireless: bool | None = None
@@ -236,6 +240,8 @@ def api_update_device(device_id: int, body: DeviceUpdate):
         if not d:
             raise HTTPException(status_code=404, detail="Device not found")
         d.name = body.name.strip() if body.name and body.name.strip() else None
+        if "is_switch" in body.model_fields_set:
+            d.is_switch = bool(body.is_switch)
         if "is_virtual" in body.model_fields_set:
             d.is_virtual = bool(body.is_virtual)
             if not d.is_virtual:
@@ -411,71 +417,89 @@ class SwitchCreate(BaseModel):
 def api_list_switches():
     with get_db() as db:
         rows = db.execute(
-            sa.select(Switch).order_by(
-                Switch.ip_address.nullslast(), Switch.mac_address
-            )
+            sa.select(Device).where(Device.is_switch == True)  # noqa: E712
+            .order_by(Device.ip_address.nullslast(), Device.mac_address)
         ).scalars().all()
-        switch_ids = [s.id for s in rows]
-        counts = {}
-        if switch_ids:
+        dev_ids = [d.id for d in rows]
+        counts: dict[int, int] = {}
+        if dev_ids:
             for sw_id, cnt in db.execute(
                 sa.select(SwitchPort.switch_id, sa.func.count(SwitchPort.id))
-                .where(SwitchPort.switch_id.in_(switch_ids))
+                .where(SwitchPort.switch_id.in_(dev_ids))
                 .group_by(SwitchPort.switch_id)
             ).all():
                 counts[sw_id] = cnt
-        return [_switch_to_dict(s, counts.get(s.id, 0)) for s in rows]
+        return [_switch_to_dict(d, counts.get(d.id, 0)) for d in rows]
 
 
 @app.post("/api/switches", status_code=201)
 def api_add_switch(body: SwitchCreate):
-    ip  = body.ip_address.strip()  if body.ip_address  else None
+    ip   = body.ip_address.strip()  if body.ip_address  else None
+    name = body.name.strip()        if body.name        else None
     try:
-        mac = _norm_mac(body.mac_address)
+        mac = _norm_mac(body.mac_address) if body.mac_address else None
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    if not ip and not mac:
-        raise HTTPException(status_code=422, detail="ip_address or mac_address is required")
+    if not ip and not mac and not name:
+        raise HTTPException(status_code=422,
+                            detail="At least one of ip_address, mac_address, or name is required")
     with get_db() as db:
-        if ip and db.execute(sa.select(Switch).where(Switch.ip_address == ip)).scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="A switch with that IP already exists")
-        if mac and db.execute(sa.select(Switch).where(Switch.mac_address == mac)).scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="A switch with that MAC already exists")
-        sw = Switch(ip_address=ip, mac_address=mac, name=body.name or None)
-        db.add(sw)
+        dev = None
+        if ip:
+            dev = db.execute(sa.select(Device).where(Device.ip_address == ip)).scalar_one_or_none()
+        if not dev and mac:
+            dev = db.execute(sa.select(Device).where(Device.mac_address == mac)).scalar_one_or_none()
+        if dev:
+            dev.is_switch = True
+            if name and not dev.name:
+                dev.name = name
+        else:
+            dev = Device(
+                ip_address=ip, mac_address=mac, name=name,
+                is_switch=True, is_online=False, open_ports=[],
+                first_seen=datetime.utcnow(), last_seen=datetime.utcnow(), scan_count=0,
+            )
+            db.add(dev)
         db.flush()
-        return _switch_to_dict(sw, 0)
+        count = db.execute(
+            sa.select(sa.func.count(SwitchPort.id)).where(SwitchPort.switch_id == dev.id)
+        ).scalar_one()
+        return _switch_to_dict(dev, count)
 
 
 @app.delete("/api/switches/{switch_id}", status_code=204)
 def api_delete_switch(switch_id: int):
     with get_db() as db:
-        sw = db.get(Switch, switch_id)
-        if not sw:
+        dev = db.get(Device, switch_id)
+        if not dev or not dev.is_switch:
             raise HTTPException(status_code=404, detail="Switch not found")
-        db.delete(sw)
+        if dev.ip_address is None and dev.scan_count == 0:
+            db.delete(dev)  # purely manual entry — delete device too
+        else:
+            dev.is_switch = False
+            db.execute(sa.delete(SwitchPort).where(SwitchPort.switch_id == switch_id))
 
 
 @app.patch("/api/switches/{switch_id}")
 def api_update_switch(switch_id: int, body: SwitchCreate):
-    ip  = body.ip_address.strip()  if body.ip_address  else None
+    ip   = body.ip_address.strip()  if body.ip_address  else None
+    name = body.name.strip()        if body.name        else None
     try:
-        mac = _norm_mac(body.mac_address)
+        mac = _norm_mac(body.mac_address) if body.mac_address else None
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    if not ip and not mac:
-        raise HTTPException(status_code=422, detail="ip_address or mac_address is required")
     with get_db() as db:
-        sw = db.get(Switch, switch_id)
-        if not sw:
+        dev = db.get(Device, switch_id)
+        if not dev or not dev.is_switch:
             raise HTTPException(status_code=404, detail="Switch not found")
-        sw.ip_address  = ip
-        sw.mac_address = mac
-        sw.name        = body.name or None
-        port_count = db.execute(
+        dev.ip_address  = ip
+        dev.mac_address = mac
+        dev.name        = name
+        db.flush()
+        count = db.execute(
             sa.select(sa.func.count(SwitchPort.id)).where(SwitchPort.switch_id == switch_id)
         ).scalar_one()
-        return _switch_to_dict(sw, port_count)
+        return _switch_to_dict(dev, count)
 
 
 # ── switch ports ──────────────────────────────────────────────────────────────
@@ -496,8 +520,8 @@ class PortUpdate(BaseModel):
 @app.get("/api/switches/{switch_id}/ports")
 def api_list_ports(switch_id: int):
     with get_db() as db:
-        sw = db.get(Switch, switch_id)
-        if not sw:
+        sw = db.get(Device, switch_id)
+        if not sw or not sw.is_switch:
             raise HTTPException(status_code=404, detail="Switch not found")
         rows = db.execute(
             sa.select(SwitchPort, Device)
@@ -515,8 +539,8 @@ def api_list_ports(switch_id: int):
 @app.post("/api/switches/{switch_id}/ports", status_code=201)
 def api_add_port(switch_id: int, body: PortCreate):
     with get_db() as db:
-        sw = db.get(Switch, switch_id)
-        if not sw:
+        sw = db.get(Device, switch_id)
+        if not sw or not sw.is_switch:
             raise HTTPException(status_code=404, detail="Switch not found")
         if body.port_type not in _VALID_PORT_TYPES:
             raise HTTPException(status_code=422, detail=f"port_type must be one of {sorted(_VALID_PORT_TYPES)}")
@@ -537,8 +561,8 @@ def api_add_port(switch_id: int, body: PortCreate):
 @app.patch("/api/switches/{switch_id}/ports/{port_id}")
 def api_update_port(switch_id: int, port_id: int, body: PortUpdate):
     with get_db() as db:
-        sw = db.get(Switch, switch_id)
-        if not sw:
+        sw = db.get(Device, switch_id)
+        if not sw or not sw.is_switch:
             raise HTTPException(status_code=404, detail="Switch not found")
         port = db.get(SwitchPort, port_id)
         if not port or port.switch_id != switch_id:
@@ -584,15 +608,16 @@ def api_delete_port(switch_id: int, port_id: int):
 @app.get("/api/ports")
 def api_all_ports():
     with get_db() as db:
+        SwDev = _aliased(Device)
         rows = db.execute(
-            sa.select(SwitchPort, Switch, Device)
-            .join(Switch, Switch.id == SwitchPort.switch_id)
+            sa.select(SwitchPort, SwDev, Device)
+            .join(SwDev, SwDev.id == SwitchPort.switch_id)
             .outerjoin(PortLink, sa.and_(
                 PortLink.port_a_id == SwitchPort.id, PortLink.dev_port_id.isnot(None)
             ))
             .outerjoin(DevicePort, DevicePort.id == PortLink.dev_port_id)
             .outerjoin(Device, Device.id == DevicePort.device_id)
-            .order_by(Switch.ip_address, SwitchPort.port_number)
+            .order_by(SwDev.ip_address, SwitchPort.port_number)
         ).all()
         return [_port_to_dict(p, s, d) for p, s, d in rows]
 
@@ -614,8 +639,8 @@ def api_list_switch_links():
         for lnk in links:
             pa  = db.get(SwitchPort, lnk.port_a_id)
             pb  = db.get(SwitchPort, lnk.port_b_id)
-            sw_a = db.get(Switch, pa.switch_id) if pa else None
-            sw_b = db.get(Switch, pb.switch_id) if pb else None
+            sw_a = db.get(Device, pa.switch_id) if pa else None
+            sw_b = db.get(Device, pb.switch_id) if pb else None
             if pa and pb and sw_a and sw_b:
                 result.append(_link_to_dict(lnk, sw_a, pa, sw_b, pb))
         return result
@@ -645,8 +670,8 @@ def api_add_switch_link(body: SwitchLinkCreate):
         lnk = PortLink(port_a_id=body.port_a_id, port_b_id=body.port_b_id)
         db.add(lnk)
         db.flush()
-        sw_a = db.get(Switch, pa.switch_id)
-        sw_b = db.get(Switch, pb.switch_id)
+        sw_a = db.get(Device, pa.switch_id)
+        sw_b = db.get(Device, pb.switch_id)
         return _link_to_dict(lnk, sw_a, pa, sw_b, pb)
 
 
@@ -664,7 +689,9 @@ def api_delete_switch_link(link_id: int):
 @app.get("/api/topology")
 def api_topology():
     with get_db() as db:
-        switches = db.execute(sa.select(Switch)).scalars().all()
+        switch_devs = db.execute(
+            sa.select(Device).where(Device.is_switch == True)  # noqa: E712
+        ).scalars().all()
 
         ports_with_devices = db.execute(
             sa.select(SwitchPort, Device)
@@ -680,7 +707,6 @@ def api_topology():
             sa.select(PortLink).where(PortLink.port_b_id.isnot(None))
         ).scalars().all()
 
-        # pre-fetch ports referenced by switch links
         link_port_ids = {lnk.port_a_id for lnk in sw_links} | {lnk.port_b_id for lnk in sw_links}
         ports_by_id: dict[int, SwitchPort] = {}
         if link_port_ids:
@@ -689,26 +715,12 @@ def api_topology():
             ).scalars().all():
                 ports_by_id[p.id] = p
 
+        sw_device_ids = {sw.id for sw in switch_devs}
         nodes: list[dict] = []
         edges: list[dict] = []
         seen: set[str] = set()
 
-        # Match devices → switches by IP and MAC to avoid duplicate nodes.
-        # MAC lookup: prefer the MAC stored on the switch row; fall back to
-        # finding a device record with the same IP (covers IP-only switches).
-        sw_by_ip:  dict[str, Switch] = {sw.ip_address:  sw for sw in switches if sw.ip_address}
-        sw_by_mac: dict[str, Switch] = {sw.mac_address.lower(): sw for sw in switches if sw.mac_address}
-        for sw in switches:
-            if not sw.mac_address and sw.ip_address:
-                dev_row = db.execute(
-                    sa.select(Device).where(Device.ip_address == sw.ip_address)
-                ).scalar_one_or_none()
-                if dev_row and dev_row.mac_address:
-                    mac_lower = dev_row.mac_address.lower()
-                    if mac_lower not in sw_by_mac:
-                        sw_by_mac[mac_lower] = sw
-
-        for sw in switches:
+        for sw in switch_devs:
             nid = f"sw_{sw.id}"
             nodes.append({
                 "id": nid, "type": "switch",
@@ -719,24 +731,19 @@ def api_topology():
 
         # Buffer switch→switch port edges so we can deduplicate them before
         # adding switch_link edges (which take precedence for the same pair).
-        # Key: frozenset of the two node IDs (direction-independent).
         sw_port_edges: dict[frozenset, dict] = {}
 
         for port, dev in ports_with_devices:
             if dev.is_virtual:
-                continue  # virtual devices are rendered inside their parent, not as nodes
+                continue
             src = f"sw_{port.switch_id}"
             if src not in seen:
                 continue
 
-            matched_sw = (
-                sw_by_ip.get(dev.ip_address)
-                or sw_by_mac.get((dev.mac_address or "").lower())
-            )
-            if matched_sw:
-                tgt = f"sw_{matched_sw.id}"
+            if dev.id in sw_device_ids:
+                tgt = f"sw_{dev.id}"
                 if src == tgt:
-                    continue  # self-loop: switch connected to its own mgmt port
+                    continue
                 key = frozenset([src, tgt])
                 if key not in sw_port_edges:
                     sw_port_edges[key] = {
@@ -790,7 +797,6 @@ def api_topology():
                 "type": "switch_link",
             })
 
-        # Add switch→switch port edges only where no switch_link covers the pair
         for key, edge in sw_port_edges.items():
             if key not in sw_link_pairs:
                 edges.append(edge)
@@ -840,7 +846,7 @@ def api_topology():
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _switch_to_dict(s: Switch, port_count: int = 0) -> dict:
+def _switch_to_dict(s: Device, port_count: int = 0) -> dict:
     return {
         "id": s.id,
         "ip_address": s.ip_address,
@@ -850,11 +856,11 @@ def _switch_to_dict(s: Switch, port_count: int = 0) -> dict:
     }
 
 
-def _sw_label(sw: Switch) -> str:
+def _sw_label(sw: Device) -> str:
     return sw.name or sw.ip_address or sw.mac_address or f"Switch {sw.id}"
 
 
-def _port_to_dict(p: SwitchPort, sw: Switch, dev: Device | None) -> dict:
+def _port_to_dict(p: SwitchPort, sw: Device, dev: Device | None) -> dict:
     return {
         "id": p.id,
         "switch_id": p.switch_id,
@@ -884,6 +890,7 @@ def _device_to_dict(d: Device, ports: list | None = None) -> dict:
         "first_seen": d.first_seen.isoformat() if d.first_seen else None,
         "last_seen": d.last_seen.isoformat() if d.last_seen else None,
         "scan_count": d.scan_count,
+        "is_switch": d.is_switch,
         "is_virtual": d.is_virtual,
         "parent_id": d.parent_id,
         "is_wireless": d.is_wireless,
@@ -905,8 +912,8 @@ def _device_to_dict(d: Device, ports: list | None = None) -> dict:
     }
 
 
-def _link_to_dict(lnk: PortLink, sw_a: Switch, pa: SwitchPort, sw_b: Switch, pb: SwitchPort) -> dict:
-    def _p(port: SwitchPort, sw: Switch) -> dict:
+def _link_to_dict(lnk: PortLink, sw_a: Device, pa: SwitchPort, sw_b: Device, pb: SwitchPort) -> dict:
+    def _p(port: SwitchPort, sw: Device) -> dict:
         return {
             "id": port.id,
             "switch_id": sw.id,

@@ -165,7 +165,7 @@ function renderDevices(devices) {
     return `<div class="device-card ${d.is_online ? '' : 'offline'}">
       <div class="device-top">
         <div class="status-dot ${statusClass}"></div>
-        <span class="device-ip">${esc(d.ip_address)}</span>
+        <span class="device-ip">${d.ip_address ? esc(d.ip_address) : '<em style="opacity:.5">no IP</em>'}</span>
       </div>
       <div class="device-name-row" onclick="startEditName(${d.id}, this)" title="Click to set a name">
         ${d.name
@@ -177,7 +177,9 @@ function renderDevices(devices) {
       ${d.mac_address ? `<div class="device-mac">${esc(d.mac_address)}</div>` : ''}
       ${ports.length ? `
         <div class="ports">
-          ${ports.map(p => `<a class="port-chip" href="https://${esc(d.ip_address)}:${p.port}" target="_blank" rel="noopener noreferrer" title="${esc(p.service || p.protocol)}">${p.port}</a>`).join('')}
+          ${ports.map(p => d.ip_address
+            ? `<a class="port-chip" href="https://${esc(d.ip_address)}:${p.port}" target="_blank" rel="noopener noreferrer" title="${esc(p.service || p.protocol)}">${p.port}</a>`
+            : `<span class="port-chip">${p.port}</span>`).join('')}
           ${extra > 0 ? `<span class="port-more">+${extra} more</span>` : ''}
         </div>` : ''}
       <button class="btn btn-sm btn-ghost device-ports-btn" onclick="openDevicePortsModal(${d.id})">
@@ -194,6 +196,10 @@ function renderDevices(devices) {
           <input type="checkbox" ${d.is_virtual ? 'checked' : ''} onchange="toggleVirtual(${d.id}, this.checked)" />
           Virtual
         </label>
+        <label class="device-virtual-label">
+          <input type="checkbox" ${d.is_switch ? 'checked' : ''} onchange="toggleSwitch(${d.id}, this.checked)" />
+          Switch
+        </label>
         ${d.is_virtual ? `
           <select class="virtual-parent-select" onchange="setVirtualParent(${d.id}, this.value)">
             <option value="">— no parent —</option>
@@ -203,8 +209,11 @@ function renderDevices(devices) {
           </select>
         ` : ''}
       </div>
+      ${d.is_switch ? `
+      <button class="btn btn-sm btn-ghost" onclick="openPortsModal(${d.id})" style="margin:4px 0 0">Manage Ports</button>
+      ` : ''}
       <div class="device-footer">
-        ${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
+        ${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
         ${d.is_online
           ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}`
           : `Offline · last seen ${timeAgo(new Date(d.last_seen + 'Z'))}`}
@@ -231,6 +240,16 @@ async function toggleVirtual(deviceId, isVirtual) {
     body: JSON.stringify({ is_virtual: isVirtual }),
   });
   await loadDevices();
+}
+
+async function toggleSwitch(deviceId, isSwitch) {
+  await apiFetch(`/api/devices/${deviceId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_switch: isSwitch }),
+  });
+  await loadDevices();
+  if (currentTab === 'topology') await loadTopologyTab();
 }
 
 async function setVirtualParent(deviceId, parentIdStr) {
@@ -542,9 +561,10 @@ function hideAddSwitchForm() {
 }
 
 async function addSwitch() {
-  const ip  = el('sw-ip').value.trim()  || null;
-  const mac = el('sw-mac').value.trim() || null;
-  if (!ip && !mac) { el('sw-form-error').textContent = 'IP address or MAC address is required.'; return; }
+  const ip   = el('sw-ip').value.trim()   || null;
+  const mac  = el('sw-mac').value.trim()  || null;
+  const name = el('sw-name').value.trim() || null;
+  if (!ip && !mac && !name) { el('sw-form-error').textContent = 'At least one of IP, MAC, or name is required.'; return; }
   try {
     await apiFetch('/api/switches', {
       method: 'POST',
@@ -552,7 +572,7 @@ async function addSwitch() {
       body: JSON.stringify({ ip_address: ip, mac_address: mac, name: el('sw-name').value.trim() || null }),
     });
     hideAddSwitchForm();
-    await loadSwitches();
+    await Promise.all([loadSwitches(), loadDevices()]);
   } catch (e) {
     el('sw-form-error').textContent = e.message || 'Failed to add switch.';
   }

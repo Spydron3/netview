@@ -857,6 +857,15 @@ tr:hover td { background: var(--surface2); }
   font-weight: 600;
   padding: 0 4px;
 }
+.device-switch-badge {
+  background: color-mix(in srgb, var(--yellow, #facc15) 15%, transparent);
+  color: var(--yellow, #facc15);
+  border: 1px solid color-mix(in srgb, var(--yellow, #facc15) 30%, transparent);
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0 4px;
+}
 
 /* ── VM host topology node ──────────────────────────────────────────────────── */
 .topo-node-vmhost .vmhost-rect {

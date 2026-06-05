@@ -136,6 +136,65 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                     "ALTER TABLE devices ADD COLUMN IF NOT EXISTS "
                     "is_wireless BOOLEAN NOT NULL DEFAULT FALSE"
                 ))
+                # switch-as-device-flag migration
+                conn.execute(text(
+                    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS "
+                    "is_switch BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE devices ALTER COLUMN ip_address DROP NOT NULL"
+                ))
+                conn.execute(text("""
+                    DO $$
+                    DECLARE
+                        sw      RECORD;
+                        dev_id  INTEGER;
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_name = 'switches'
+                        ) THEN
+                            -- drop old FK so we can repoint switch_ports.switch_id
+                            ALTER TABLE switch_ports
+                                DROP CONSTRAINT IF EXISTS switch_ports_switch_id_fkey;
+                            FOR sw IN SELECT * FROM switches LOOP
+                                dev_id := NULL;
+                                IF sw.ip_address IS NOT NULL THEN
+                                    SELECT id INTO dev_id FROM devices
+                                    WHERE ip_address = sw.ip_address LIMIT 1;
+                                END IF;
+                                IF dev_id IS NULL AND sw.mac_address IS NOT NULL THEN
+                                    SELECT id INTO dev_id FROM devices
+                                    WHERE mac_address = sw.mac_address LIMIT 1;
+                                END IF;
+                                IF dev_id IS NULL THEN
+                                    INSERT INTO devices (
+                                        ip_address, mac_address, name,
+                                        is_switch, is_online, open_ports,
+                                        first_seen, last_seen, scan_count,
+                                        is_virtual, is_wireless
+                                    ) VALUES (
+                                        sw.ip_address, sw.mac_address, sw.name,
+                                        TRUE, FALSE, '[]'::json,
+                                        NOW(), NOW(), 0, FALSE, FALSE
+                                    ) RETURNING id INTO dev_id;
+                                ELSE
+                                    UPDATE devices
+                                    SET is_switch = TRUE,
+                                        name = COALESCE(name, sw.name)
+                                    WHERE id = dev_id;
+                                END IF;
+                                UPDATE switch_ports SET switch_id = dev_id
+                                WHERE switch_id = sw.id;
+                            END LOOP;
+                            ALTER TABLE switch_ports
+                                ADD CONSTRAINT switch_ports_switch_id_fkey
+                                FOREIGN KEY (switch_id)
+                                REFERENCES devices(id) ON DELETE CASCADE;
+                            DROP TABLE switches;
+                        END IF;
+                    END $$
+                """))
                 # seed default settings from env vars on first run
                 defaults = {
                     "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),

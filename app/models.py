@@ -9,7 +9,7 @@ class Device(Base):
     __tablename__ = "devices"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    ip_address = Column(String(45), unique=True, nullable=False, index=True)
+    ip_address = Column(String(45), unique=True, nullable=True, index=True)
     name = Column(String(255), nullable=True)
     mac_address = Column(String(17), nullable=True)
     hostname = Column(String(255), nullable=True)
@@ -21,6 +21,7 @@ class Device(Base):
     first_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
     last_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
     scan_count = Column(Integer, default=1, nullable=False)
+    is_switch   = Column(Boolean, default=False, nullable=False, server_default="false")
     is_virtual  = Column(Boolean, default=False, nullable=False, server_default="false")
     parent_id   = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True)
     is_wireless = Column(Boolean, default=False, nullable=False, server_default="false")
@@ -33,20 +34,11 @@ class Setting(Base):
     value = Column(String(255), nullable=False)
 
 
-class Switch(Base):
-    __tablename__ = "switches"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    ip_address  = Column(String(45),  unique=True, nullable=True)
-    mac_address = Column(String(17),  unique=True, nullable=True)
-    name        = Column(String(255), nullable=True)
-
-
 class SwitchPort(Base):
     __tablename__ = "switch_ports"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    switch_id = Column(Integer, ForeignKey("switches.id", ondelete="CASCADE"), nullable=False)
+    switch_id = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False)
     port_number = Column(Integer, nullable=False)
     label = Column(String(100), nullable=True)
     port_type = Column(String(10), nullable=False, default="RJ45")  # RJ45 | SFP+
