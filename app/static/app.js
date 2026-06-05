@@ -177,7 +177,7 @@ function renderDevices(devices) {
       ${d.mac_address ? `<div class="device-mac">${esc(d.mac_address)}</div>` : ''}
       ${ports.length ? `
         <div class="ports">
-          ${ports.map(p => `<span class="port-chip" title="${esc(p.service || p.protocol)}">${p.port}</span>`).join('')}
+          ${ports.map(p => `<a class="port-chip" href="https://${esc(d.ip_address)}:${p.port}" target="_blank" rel="noopener noreferrer" title="${esc(p.service || p.protocol)}">${p.port}</a>`).join('')}
           ${extra > 0 ? `<span class="port-more">+${extra} more</span>` : ''}
         </div>` : ''}
       <button class="btn btn-sm btn-ghost device-ports-btn" onclick="openDevicePortsModal(${d.id})">

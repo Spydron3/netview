@@ -313,6 +313,13 @@ main {
   font-family: ui-monospace, monospace;
   font-size: 11px;
   color: var(--purple);
+  text-decoration: none;
+  cursor: pointer;
+}
+.port-chip:hover {
+  background: var(--surface3, var(--border));
+  border-color: var(--purple);
+  text-decoration: none;
 }
 .port-more {
   font-size: 11px;
