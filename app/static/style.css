@@ -871,6 +871,10 @@ tr:hover td { background: var(--surface2); }
   stroke: var(--muted);
   stroke-dasharray: 2 1;
 }
+.vmchild-label {
+  font-size: 9px;
+  fill: var(--muted);
+}
 
 /* ── node detail: virtual machines section ──────────────────────────────────── */
 .nd-vms { margin-top: 10px; }

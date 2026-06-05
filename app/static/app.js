@@ -810,7 +810,7 @@ function renderTopology(data) {
     .force('center',    d3.forceCenter(W / 2, H / 2))
     .force('collision', d3.forceCollide(d => {
         if (d.type === 'device' && (d.virtual_children || []).length > 0) {
-          const w = Math.max(60, 20 + d.virtual_children.length * 22);
+          const w = Math.max(70, 20 + d.virtual_children.length * 30);
           return w / 2 + 16;
         }
         return 46;
@@ -847,28 +847,33 @@ function renderTopology(data) {
   // VM host nodes: rounded rect containing child circles
   node.filter(d => d.type === 'device' && (d.virtual_children || []).length > 0)
     .each(function(d) {
-      const n  = d.virtual_children.length;
-      const w  = Math.max(60, 20 + n * 22);
-      const h  = 44;
-      const g2 = d3.select(this);
+      const n       = d.virtual_children.length;
+      const spacing = 30;
+      const w       = Math.max(70, 20 + n * spacing);
+      const h       = 62;
+      const g2      = d3.select(this);
       g2.append('rect')
         .attr('width', w).attr('height', h)
         .attr('x', -w / 2).attr('y', -h / 2)
         .attr('rx', 6).attr('class', 'vmhost-rect');
-      const spacing = 22;
-      const startX  = -(n - 1) * spacing / 2;
+      const startX = -(n - 1) * spacing / 2;
       d.virtual_children.forEach((child, i) => {
-        const cx = startX + i * spacing;
-        g2.append('circle')
-          .attr('cx', cx).attr('cy', 4).attr('r', 8)
+        const cx  = startX + i * spacing;
+        const cg  = g2.append('g').attr('transform', `translate(${cx},0)`);
+        cg.append('circle')
+          .attr('r', 8)
           .attr('class', `vmchild-dot ${child.is_online ? 'vm-on' : 'vm-off'}`);
+        cg.append('text')
+          .attr('dy', 20).attr('text-anchor', 'middle')
+          .attr('class', 'vmchild-label')
+          .text(_truncate(child.label, 6));
       });
     });
 
   node.append('text').attr('dy', d => {
       if (d.type === 'switch') return 28;
       if ((d.virtual_children || []).length > 0) {
-        const h = 44;
+        const h = 62;
         return h / 2 + 14;  // below the rect
       }
       return 33;
