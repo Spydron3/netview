@@ -1001,6 +1001,25 @@ tr:hover td { background: var(--surface2); }
   color: var(--muted);
 }
 
+/* ── node detail: ports section ─────────────────────────────────────────────── */
+.nd-ports-section { margin-top: 10px; }
+.nd-ports-title {
+  font-size: 11px; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px;
+}
+.nd-ports-list { display: flex; flex-direction: column; gap: 2px; }
+.nd-port-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 4px;
+  font-size: 11px;
+  align-items: center;
+}
+.nd-port-num  { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nd-port-type { color: var(--muted); white-space: nowrap; text-align: center; }
+.nd-port-dev  { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nd-port-row.nd-port-empty .nd-port-dev { color: var(--muted); }
+
 /* ── wireless topology node ─────────────────────────────────────────────────── */
 .topo-node-wireless circle {
   stroke: var(--cyan, #22d3ee);

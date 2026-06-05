@@ -1102,7 +1102,7 @@ function renderTopology(data) {
 
 // ── node detail panel ─────────────────────────────────────────────────────────
 
-function showNodeDetail(d) {
+async function showNodeDetail(d) {
   const panel = el('node-detail');
   const body  = el('node-detail-body');
 
@@ -1111,6 +1111,7 @@ function showNodeDetail(d) {
   if (d.mac)      rows.push(['MAC',      d.mac]);
   if (d.hostname) rows.push(['Hostname', d.hostname]);
   if (d.vendor)   rows.push(['Vendor',   d.vendor]);
+  if (d.room)     rows.push(['Room',     d.room]);
   if (d.name && d.name !== d.label) rows.push(['Name', d.name]);
 
   const online = d.is_online === true  ? '<span style="color:var(--green)">Online</span>'
@@ -1119,7 +1120,7 @@ function showNodeDetail(d) {
 
   const vms = d.virtual_children || [];
   body.innerHTML = `
-    <div class="nd-type">${d.type.replace('_', ' ')}</div>
+    <div class="nd-type">${d.type === 'switch' ? 'Switch' : 'Device'}</div>
     <div class="nd-label">${esc(d.label)}</div>
     ${online ? `<div class="nd-online">${online}</div>` : ''}
     <dl class="nd-props">
@@ -1133,9 +1134,33 @@ function showNodeDetail(d) {
           <span class="nd-vm-dot ${c.is_online ? 'vm-on' : 'vm-off'}"></span>
           <span>${esc(c.label)}${c.ip ? ` <span class="nd-vm-ip">${esc(c.ip)}</span>` : ''}</span>
         </div>`).join('')}
-    </div>` : ''}`;
+    </div>` : ''}
+    ${d.type === 'switch' ? '<div class="nd-ports-section" id="nd-ports"><span style="color:var(--muted);font-size:11px">Loading ports…</span></div>' : ''}`;
 
   panel.classList.remove('hidden');
+
+  if (d.type === 'switch') {
+    const swId = parseInt(d.id.slice(3));
+    try {
+      const ports = await apiFetch(`/api/switches/${swId}/ports`);
+      const connected = ports.filter(p => p.link_id);
+      const section = el('nd-ports');
+      if (!ports.length) { section.innerHTML = ''; return; }
+      section.innerHTML = `
+        <div class="nd-ports-title">Ports (${connected.length}/${ports.length} connected)</div>
+        <div class="nd-ports-list">
+          ${ports.map(p => `
+            <div class="nd-port-row ${p.link_id ? '' : 'nd-port-empty'}">
+              <span class="nd-port-num">${p.label || 'Port ' + p.port_number}</span>
+              <span class="nd-port-type">${p.port_type}·${p.speed}</span>
+              ${p.link_id ? `<span class="nd-port-dev">${esc(p.device_label || '?')}</span>` : '<span class="nd-port-dev nd-port-empty">—</span>'}
+            </div>`).join('')}
+        </div>`;
+    } catch (e) {
+      const section = el('nd-ports');
+      if (section) section.innerHTML = '';
+    }
+  }
 }
 
 function closeNodeDetail() {

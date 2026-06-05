@@ -1030,8 +1030,10 @@ def api_topology():
             nodes.append({
                 "id": nid, "type": "switch",
                 "label": _sw_label(sw),
-                "ip": sw.ip_address, "name": sw.name,
-                "room": rooms.get(sw.room_id),
+                "ip": sw.ip_address, "mac": sw.mac_address,
+                "hostname": sw.hostname, "vendor": sw.vendor,
+                "name": sw.name, "room": rooms.get(sw.room_id),
+                "is_online": True if not sw.ip_address else sw.is_online,
             })
             seen.add(nid)
 
