@@ -709,7 +709,7 @@ def _switch_to_dict(s: Switch, port_count: int = 0) -> dict:
 
 
 def _sw_label(sw: Switch) -> str:
-    return _sw_label(sw) or sw.mac_address or f"Switch {sw.id}"
+    return sw.name or sw.ip_address or sw.mac_address or f"Switch {sw.id}"
 
 
 def _port_to_dict(p: SwitchPort, sw: Switch, dev: Device | None) -> dict:
