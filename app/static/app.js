@@ -1148,9 +1148,11 @@ let _edgeTip = null;
 function showEdgeTip(ev, d) {
   let text = null;
   if (d.type === 'switch_link') {
-    text = d.port_a && d.port_b
+    text = (d.port_a && d.port_b)
       ? `${d.port_a} (${d.port_a_type}·${d.speed_a}) ↔ ${d.port_b} (${d.port_b_type}·${d.speed_b})`
-      : d.port ? `${d.port} · ${d.port_type} · ${d.speed}` : null;
+      : (d.port_a || d.port)
+        ? `${d.port_a || d.port} (${d.port_a_type || d.port_type}·${d.speed_a || d.speed})`
+        : null;
   } else if (d.port) {
     text = `${d.port} · ${d.port_type} · ${d.speed}`;
   }

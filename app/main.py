@@ -1043,14 +1043,18 @@ def api_topology():
                 if src == tgt:
                     continue
                 key = frozenset([src, tgt])
+                lbl = port.label or f"Port {port.port_number}"
                 if key not in sw_port_edges:
                     sw_port_edges[key] = {
                         "source": src, "target": tgt,
-                        "port": port.label or f"Port {port.port_number}",
-                        "port_type": port.port_type,
-                        "speed": port.speed,
+                        "port_a": lbl, "port_a_type": port.port_type, "speed_a": port.speed,
                         "type": "switch_link",
                     }
+                else:
+                    e = sw_port_edges[key]
+                    e["port_b"] = lbl
+                    e["port_b_type"] = port.port_type
+                    e["speed_b"] = port.speed
             else:
                 tgt = f"dev_{dev.id}"
                 if tgt not in seen:
