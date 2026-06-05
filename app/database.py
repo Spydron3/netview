@@ -93,6 +93,15 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                         END IF;
                     END $$
                 """))
+                # virtual device fields
+                conn.execute(text(
+                    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS "
+                    "is_virtual BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS "
+                    "parent_id INTEGER REFERENCES devices(id) ON DELETE SET NULL"
+                ))
                 # seed default settings from env vars on first run
                 defaults = {
                     "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),

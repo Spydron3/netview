@@ -185,13 +185,49 @@ function renderDevices(devices) {
           ? `${d.switch_ports.length} port${d.switch_ports.length !== 1 ? 's' : ''}`
           : 'Assign port'}
       </button>
+      <div class="device-virtual-row">
+        <label class="device-virtual-label">
+          <input type="checkbox" ${d.is_virtual ? 'checked' : ''} onchange="toggleVirtual(${d.id}, this.checked)" />
+          Virtual
+        </label>
+        ${d.is_virtual ? `
+          <select class="virtual-parent-select" onchange="setVirtualParent(${d.id}, this.value)">
+            <option value="">— no parent —</option>
+            ${allDevices.filter(x => !x.is_virtual && x.id !== d.id).map(x =>
+              `<option value="${x.id}" ${x.id === d.parent_id ? 'selected' : ''}>${esc(x.name || x.ip_address)}</option>`
+            ).join('')}
+          </select>
+        ` : ''}
+      </div>
       <div class="device-footer">
+        ${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
         ${d.is_online
           ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}`
           : `Offline · last seen ${timeAgo(new Date(d.last_seen + 'Z'))}`}
       </div>
     </div>`;
   }).join('');
+}
+
+// ── virtual device helpers ────────────────────────────────────────────────────
+
+async function toggleVirtual(deviceId, isVirtual) {
+  await apiFetch(`/api/devices/${deviceId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_virtual: isVirtual }),
+  });
+  await loadDevices();
+}
+
+async function setVirtualParent(deviceId, parentIdStr) {
+  const parent_id = parentIdStr ? parseInt(parentIdStr) : null;
+  await apiFetch(`/api/devices/${deviceId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parent_id }),
+  });
+  await loadDevices();
 }
 
 // ── device ports modal ───────────────────────────────────────────────────────
@@ -772,7 +808,13 @@ function renderTopology(data) {
                           .distance(d => d.type === 'switch_link' ? 220 : 130))
     .force('charge',    d3.forceManyBody().strength(d => d.type === 'switch' ? -700 : -280))
     .force('center',    d3.forceCenter(W / 2, H / 2))
-    .force('collision', d3.forceCollide(46));
+    .force('collision', d3.forceCollide(d => {
+        if (d.type === 'device' && (d.virtual_children || []).length > 0) {
+          const w = Math.max(60, 20 + d.virtual_children.length * 22);
+          return w / 2 + 16;
+        }
+        return 46;
+      }));
 
   const edgeG = g.append('g').attr('class', 'topo-edges');
   const edge = edgeG.selectAll('path').data(edges).join('path')
@@ -785,6 +827,7 @@ function renderTopology(data) {
     .attr('class', d => {
       let cls = `topo-node topo-node-${d.type}`;
       if (d.type === 'device' && d.is_online === false) cls += ' topo-node-offline';
+      if (d.type === 'device' && (d.virtual_children || []).length > 0) cls += ' topo-node-vmhost';
       return cls;
     })
     .call(d3.drag()
@@ -797,10 +840,39 @@ function renderTopology(data) {
   node.filter(d => d.type === 'switch')
     .append('rect').attr('width', 52).attr('height', 34).attr('x', -26).attr('y', -17).attr('rx', 5);
 
-  node.filter(d => d.type === 'device')
+  // Regular device nodes (no virtual children)
+  node.filter(d => d.type === 'device' && !(d.virtual_children || []).length)
     .append('circle').attr('r', 20);
 
-  node.append('text').attr('dy', d => d.type === 'switch' ? 28 : 33)
+  // VM host nodes: rounded rect containing child circles
+  node.filter(d => d.type === 'device' && (d.virtual_children || []).length > 0)
+    .each(function(d) {
+      const n  = d.virtual_children.length;
+      const w  = Math.max(60, 20 + n * 22);
+      const h  = 44;
+      const g2 = d3.select(this);
+      g2.append('rect')
+        .attr('width', w).attr('height', h)
+        .attr('x', -w / 2).attr('y', -h / 2)
+        .attr('rx', 6).attr('class', 'vmhost-rect');
+      const spacing = 22;
+      const startX  = -(n - 1) * spacing / 2;
+      d.virtual_children.forEach((child, i) => {
+        const cx = startX + i * spacing;
+        g2.append('circle')
+          .attr('cx', cx).attr('cy', 4).attr('r', 8)
+          .attr('class', `vmchild-dot ${child.is_online ? 'vm-on' : 'vm-off'}`);
+      });
+    });
+
+  node.append('text').attr('dy', d => {
+      if (d.type === 'switch') return 28;
+      if ((d.virtual_children || []).length > 0) {
+        const h = 44;
+        return h / 2 + 14;  // below the rect
+      }
+      return 33;
+    })
     .text(d => _truncate(d.label, 16));
 
   topoSimulation.on('tick', () => {
@@ -842,13 +914,23 @@ function showNodeDetail(d) {
                : d.is_online === false ? '<span style="color:var(--muted)">Offline</span>'
                : '';
 
+  const vms = d.virtual_children || [];
   body.innerHTML = `
     <div class="nd-type">${d.type.replace('_', ' ')}</div>
     <div class="nd-label">${esc(d.label)}</div>
     ${online ? `<div class="nd-online">${online}</div>` : ''}
     <dl class="nd-props">
       ${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(String(v))}</dd>`).join('')}
-    </dl>`;
+    </dl>
+    ${vms.length ? `
+    <div class="nd-vms">
+      <div class="nd-vms-title">Virtual machines (${vms.length})</div>
+      ${vms.map(c => `
+        <div class="nd-vm-row">
+          <span class="nd-vm-dot ${c.is_online ? 'vm-on' : 'vm-off'}"></span>
+          <span>${esc(c.label)}${c.ip ? ` <span class="nd-vm-ip">${esc(c.ip)}</span>` : ''}</span>
+        </div>`).join('')}
+    </div>` : ''}`;
 
   panel.classList.remove('hidden');
 }

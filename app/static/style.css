@@ -810,3 +810,95 @@ tr:hover td { background: var(--surface2); }
   border-radius: 4px;
 }
 .btn-delete:hover { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+
+/* ── virtual device (device card) ──────────────────────────────────────────── */
+.device-virtual-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 2px;
+  flex-wrap: wrap;
+}
+.device-virtual-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.device-virtual-label input { cursor: pointer; }
+.virtual-parent-select {
+  font-size: 11px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 1px 4px;
+  flex: 1;
+  min-width: 0;
+}
+.device-vm-badge {
+  background: color-mix(in srgb, var(--blue) 15%, transparent);
+  color: var(--blue);
+  border: 1px solid color-mix(in srgb, var(--blue) 30%, transparent);
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+/* ── VM host topology node ──────────────────────────────────────────────────── */
+.topo-node-vmhost .vmhost-rect {
+  fill: var(--surface2);
+  stroke: var(--blue);
+  stroke-width: 1.5;
+}
+.topo-node-vmhost.topo-node-offline .vmhost-rect {
+  stroke: var(--muted);
+  stroke-dasharray: 4 2;
+}
+.vmchild-dot {
+  stroke-width: 1.5;
+}
+.vmchild-dot.vm-on {
+  fill: color-mix(in srgb, var(--green) 25%, transparent);
+  stroke: var(--green);
+}
+.vmchild-dot.vm-off {
+  fill: color-mix(in srgb, var(--muted) 20%, transparent);
+  stroke: var(--muted);
+  stroke-dasharray: 2 1;
+}
+
+/* ── node detail: virtual machines section ──────────────────────────────────── */
+.nd-vms { margin-top: 10px; }
+.nd-vms-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 4px;
+}
+.nd-vm-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 2px 0;
+}
+.nd-vm-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.nd-vm-dot.vm-on  { background: var(--green); }
+.nd-vm-dot.vm-off { background: var(--muted); }
+.nd-vm-ip {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}

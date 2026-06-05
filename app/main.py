@@ -224,6 +224,8 @@ def api_device(device_id: int):
 
 class DeviceUpdate(BaseModel):
     name: str | None = None
+    is_virtual: bool | None = None
+    parent_id: int | None = None
 
 
 @app.patch("/api/devices/{device_id}")
@@ -233,6 +235,20 @@ def api_update_device(device_id: int, body: DeviceUpdate):
         if not d:
             raise HTTPException(status_code=404, detail="Device not found")
         d.name = body.name.strip() if body.name and body.name.strip() else None
+        if "is_virtual" in body.model_fields_set:
+            d.is_virtual = bool(body.is_virtual)
+            if not d.is_virtual:
+                d.parent_id = None
+        if "parent_id" in body.model_fields_set:
+            if body.parent_id is not None:
+                parent = db.get(Device, body.parent_id)
+                if not parent:
+                    raise HTTPException(status_code=404, detail="Parent device not found")
+                if parent.is_virtual:
+                    raise HTTPException(status_code=422, detail="Parent cannot itself be virtual")
+                if body.parent_id == device_id:
+                    raise HTTPException(status_code=422, detail="Device cannot be its own parent")
+            d.parent_id = body.parent_id
         db.flush()
         return _device_to_dict(d, _device_ports(db, device_id))
 
@@ -669,6 +685,8 @@ def api_topology():
         sw_port_edges: dict[frozenset, dict] = {}
 
         for port, dev in ports_with_devices:
+            if dev.is_virtual:
+                continue  # virtual devices are rendered inside their parent, not as nodes
             src = f"sw_{port.switch_id}"
             if src not in seen:
                 continue
@@ -738,6 +756,27 @@ def api_topology():
             if key not in sw_link_pairs:
                 edges.append(edge)
 
+        # Attach virtual devices as children of their parent device node
+        virtual_devs = db.execute(
+            sa.select(Device).where(
+                sa.and_(Device.is_virtual == True, Device.parent_id.isnot(None))  # noqa: E712
+            )
+        ).scalars().all()
+        vchildren: dict[int, list] = {}
+        for vd in virtual_devs:
+            vchildren.setdefault(vd.parent_id, []).append({
+                "id": vd.id,
+                "label": vd.name or vd.hostname or vd.ip_address or f"VM {vd.id}",
+                "ip": vd.ip_address,
+                "is_online": vd.is_online,
+            })
+        for node in nodes:
+            if node["type"] == "device":
+                dev_id = int(node["id"][4:])  # strip "dev_"
+                kids = vchildren.get(dev_id)
+                if kids:
+                    node["virtual_children"] = kids
+
     return {"nodes": nodes, "edges": edges}
 
 
@@ -787,6 +826,8 @@ def _device_to_dict(d: Device, ports: list | None = None) -> dict:
         "first_seen": d.first_seen.isoformat() if d.first_seen else None,
         "last_seen": d.last_seen.isoformat() if d.last_seen else None,
         "scan_count": d.scan_count,
+        "is_virtual": d.is_virtual,
+        "parent_id": d.parent_id,
         "switch_ports": [
             {
                 "id": p.id,
