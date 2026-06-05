@@ -870,6 +870,7 @@ function hideEdgeTip() {
 async function apiFetch(url, opts = {}) {
   const res = await fetch(url, opts);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (res.status === 204) return null;
   return res.json();
 }
 
