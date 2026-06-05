@@ -131,6 +131,40 @@
         </div>
 
         <div id="switches-list"></div>
+
+        <div class="switches-panel-header switches-panel-section">
+          <h3>Switch Links</h3>
+          <button class="btn btn-sm" onclick="showAddLinkForm()">+ Add</button>
+        </div>
+
+        <div id="add-link-form" class="add-link-form hidden">
+          <div class="link-form-group">
+            <label>Switch A</label>
+            <select id="link-sw-a" class="port-select link-select" onchange="loadLinkPorts('a')">
+              <option value="">— select switch —</option>
+            </select>
+            <select id="link-port-a" class="port-select link-select">
+              <option value="">— select port —</option>
+            </select>
+          </div>
+          <div class="link-form-group">
+            <label>Switch B</label>
+            <select id="link-sw-b" class="port-select link-select" onchange="loadLinkPorts('b')">
+              <option value="">— select switch —</option>
+            </select>
+            <select id="link-port-b" class="port-select link-select">
+              <option value="">— select port —</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <button class="btn btn-sm" onclick="addSwitchLink()">Save</button>
+            <button class="btn btn-sm btn-ghost" onclick="hideAddLinkForm()">Cancel</button>
+          </div>
+          <p id="link-form-error" class="form-error"></p>
+        </div>
+
+        <div id="links-list"></div>
+
       </div>
 
     </div>

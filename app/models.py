@@ -50,6 +50,16 @@ class SwitchPort(Base):
     device_id = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True)
 
 
+class SwitchLink(Base):
+    __tablename__ = "switch_links"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    switch_a_id = Column(Integer, ForeignKey("switches.id",      ondelete="CASCADE"), nullable=False)
+    port_a_id   = Column(Integer, ForeignKey("switch_ports.id",  ondelete="CASCADE"), nullable=False)
+    switch_b_id = Column(Integer, ForeignKey("switches.id",      ondelete="CASCADE"), nullable=False)
+    port_b_id   = Column(Integer, ForeignKey("switch_ports.id",  ondelete="CASCADE"), nullable=False)
+
+
 class ScanRun(Base):
     __tablename__ = "scan_runs"
 

@@ -506,8 +506,9 @@ tr:hover td { background: var(--surface2); }
 .topo-node:hover circle { filter: brightness(1.3); }
 
 /* D3 edges */
-.topo-edge      { fill: none; stroke: var(--border); stroke-width: 1.5; }
-.topo-edge-port { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.topo-edge             { fill: none; stroke-width: 1.5; }
+.topo-edge-port        { stroke: var(--muted); stroke-width: 1.5; }
+.topo-edge-switch_link { stroke: var(--blue); stroke-width: 2; stroke-dasharray: 6 3; }
 
 /* legend */
 .topo-legend {
@@ -744,6 +745,53 @@ tr:hover td { background: var(--surface2); }
 .switch-info { display: flex; align-items: center; gap: 8px; }
 .switch-name { font-size: 13px; font-weight: 500; cursor: pointer; }
 .switch-meta { font-size: 11px; color: var(--muted); }
+
+/* ── switch links ── */
+.switches-panel-section {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.link-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.link-side {
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.link-arrow {
+  font-size: 11px;
+  color: var(--blue);
+  font-weight: 600;
+  line-height: 1;
+}
+.add-link-form {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.add-link-form.hidden { display: none; }
+.link-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.link-form-group label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.link-select { width: 100%; }
 
 .btn-delete {
   background: none;

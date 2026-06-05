@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from database import get_db, get_setting, init_db, set_setting
-from models import Device, ScanRun, Setting, Switch, SwitchPort
+from models import Device, ScanRun, Setting, Switch, SwitchLink, SwitchPort
 from scanner import get_network_range, scan_network
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -488,16 +488,83 @@ def api_all_ports():
         return [_port_to_dict(p, s, d) for p, s, d in rows]
 
 
+# ── switch links ──────────────────────────────────────────────────────────────
+
+class SwitchLinkCreate(BaseModel):
+    port_a_id: int
+    port_b_id: int
+
+
+@app.get("/api/switch-links")
+def api_list_switch_links():
+    with get_db() as db:
+        links = db.execute(sa.select(SwitchLink)).scalars().all()
+        result = []
+        for lnk in links:
+            pa = db.get(SwitchPort, lnk.port_a_id)
+            pb = db.get(SwitchPort, lnk.port_b_id)
+            sa_ = db.get(Switch, lnk.switch_a_id)
+            sb  = db.get(Switch, lnk.switch_b_id)
+            if pa and pb and sa_ and sb:
+                result.append(_link_to_dict(lnk, sa_, pa, sb, pb))
+        return result
+
+
+@app.post("/api/switch-links", status_code=201)
+def api_add_switch_link(body: SwitchLinkCreate):
+    with get_db() as db:
+        pa = db.get(SwitchPort, body.port_a_id)
+        pb = db.get(SwitchPort, body.port_b_id)
+        if not pa:
+            raise HTTPException(status_code=404, detail="Port A not found")
+        if not pb:
+            raise HTTPException(status_code=404, detail="Port B not found")
+        if pa.switch_id == pb.switch_id:
+            raise HTTPException(status_code=422, detail="Cannot link a switch to itself")
+        lnk = SwitchLink(
+            switch_a_id=pa.switch_id,
+            port_a_id=body.port_a_id,
+            switch_b_id=pb.switch_id,
+            port_b_id=body.port_b_id,
+        )
+        db.add(lnk)
+        db.flush()
+        sa_ = db.get(Switch, lnk.switch_a_id)
+        sb  = db.get(Switch, lnk.switch_b_id)
+        return _link_to_dict(lnk, sa_, pa, sb, pb)
+
+
+@app.delete("/api/switch-links/{link_id}", status_code=204)
+def api_delete_switch_link(link_id: int):
+    with get_db() as db:
+        lnk = db.get(SwitchLink, link_id)
+        if not lnk:
+            raise HTTPException(status_code=404, detail="Link not found")
+        db.delete(lnk)
+
+
 # ── topology (manual) ─────────────────────────────────────────────────────────
 
 @app.get("/api/topology")
 def api_topology():
     with get_db() as db:
         switches = db.execute(sa.select(Switch)).scalars().all()
+
         ports_with_devices = db.execute(
             sa.select(SwitchPort, Device)
             .join(Device, Device.id == SwitchPort.device_id)
         ).all()
+
+        sw_links = db.execute(sa.select(SwitchLink)).scalars().all()
+
+        # pre-fetch ports referenced by switch links
+        link_port_ids = {lnk.port_a_id for lnk in sw_links} | {lnk.port_b_id for lnk in sw_links}
+        ports_by_id: dict[int, SwitchPort] = {}
+        if link_port_ids:
+            for p in db.execute(
+                sa.select(SwitchPort).where(SwitchPort.id.in_(link_port_ids))
+            ).scalars().all():
+                ports_by_id[p.id] = p
 
         nodes: list[dict] = []
         edges: list[dict] = []
@@ -532,6 +599,24 @@ def api_topology():
                 "port_type": port.port_type,
                 "speed": port.speed,
                 "type": "port",
+            })
+
+        for lnk in sw_links:
+            src = f"sw_{lnk.switch_a_id}"
+            tgt = f"sw_{lnk.switch_b_id}"
+            if src not in seen or tgt not in seen:
+                continue
+            pa = ports_by_id.get(lnk.port_a_id)
+            pb = ports_by_id.get(lnk.port_b_id)
+            edges.append({
+                "source": src, "target": tgt,
+                "port_a": pa.label or f"Port {pa.port_number}" if pa else "?",
+                "port_b": pb.label or f"Port {pb.port_number}" if pb else "?",
+                "port_a_type": pa.port_type if pa else "",
+                "port_b_type": pb.port_type if pb else "",
+                "speed_a": pa.speed if pa else "",
+                "speed_b": pb.speed if pb else "",
+                "type": "switch_link",
             })
 
     return {"nodes": nodes, "edges": edges}
@@ -588,6 +673,28 @@ def _device_to_dict(d: Device, port: SwitchPort | None = None, sw: Switch | None
             "port_type": port.port_type,
             "speed": port.speed,
         } if port and sw else None,
+    }
+
+
+def _link_to_dict(lnk: SwitchLink, sw_a: Switch, pa: SwitchPort, sw_b: Switch, pb: SwitchPort) -> dict:
+    def _p(port: SwitchPort, sw: Switch) -> dict:
+        return {
+            "id": port.id,
+            "switch_id": sw.id,
+            "switch_name": sw.name or sw.ip_address,
+            "port_number": port.port_number,
+            "label": port.label,
+            "port_type": port.port_type,
+            "speed": port.speed,
+        }
+    return {
+        "id": lnk.id,
+        "switch_a_id": lnk.switch_a_id,
+        "port_a_id": lnk.port_a_id,
+        "switch_b_id": lnk.switch_b_id,
+        "port_b_id": lnk.port_b_id,
+        "port_a": _p(pa, sw_a),
+        "port_b": _p(pb, sw_b),
     }
 
 

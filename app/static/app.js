@@ -342,7 +342,7 @@ function startAutoRefresh() {
 let topoSimulation = null;
 
 async function loadTopologyTab() {
-  await Promise.all([loadSwitches(), loadTopology()]);
+  await Promise.all([loadSwitches(), loadSwitchLinks(), loadTopology()]);
 }
 
 // ── switch management ─────────────────────────────────────────────────────────
@@ -404,9 +404,105 @@ async function deleteSwitch(id) {
   if (!confirm('Remove this switch and all its ports?')) return;
   try {
     await apiFetch(`/api/switches/${id}`, { method: 'DELETE' });
-    await Promise.all([loadSwitches(), loadAllPorts(), loadTopology()]);
+    await Promise.all([loadSwitches(), loadSwitchLinks(), loadAllPorts(), loadTopology()]);
     applyFilter();
   } catch (e) { console.error('deleteSwitch:', e); }
+}
+
+// ── switch links ──────────────────────────────────────────────────────────────
+
+async function loadSwitchLinks() {
+  try {
+    const links = await apiFetch('/api/switch-links');
+    renderSwitchLinks(links);
+  } catch (e) { console.error('loadSwitchLinks:', e); }
+}
+
+function renderSwitchLinks(links) {
+  const list = el('links-list');
+  if (!links.length) {
+    list.innerHTML = '<p class="empty-sw">No switch links defined.</p>';
+    return;
+  }
+  list.innerHTML = links.map(lnk => {
+    const a = lnk.port_a;
+    const b = lnk.port_b;
+    const labelA = `${esc(a.switch_name)}: ${esc(a.label || ('Port ' + a.port_number))} (${esc(a.port_type)}·${esc(a.speed)})`;
+    const labelB = `${esc(b.switch_name)}: ${esc(b.label || ('Port ' + b.port_number))} (${esc(b.port_type)}·${esc(b.speed)})`;
+    return `<div class="switch-row">
+      <div class="link-info">
+        <span class="link-side">${labelA}</span>
+        <span class="link-arrow">↔</span>
+        <span class="link-side">${labelB}</span>
+      </div>
+      <button class="btn-delete" onclick="deleteSwitchLink(${lnk.id})" title="Remove link">✕</button>
+    </div>`;
+  }).join('');
+}
+
+async function showAddLinkForm() {
+  el('link-form-error').textContent = '';
+  // populate switch dropdowns
+  const switches = await apiFetch('/api/switches');
+  const opts = '<option value="">— select switch —</option>' +
+    switches.map(s => `<option value="${s.id}">${esc(s.name || s.ip_address)}</option>`).join('');
+  el('link-sw-a').innerHTML = opts;
+  el('link-sw-b').innerHTML = opts;
+  el('link-port-a').innerHTML = '<option value="">— select port —</option>';
+  el('link-port-b').innerHTML = '<option value="">— select port —</option>';
+  el('add-link-form').classList.remove('hidden');
+}
+
+function hideAddLinkForm() {
+  el('add-link-form').classList.add('hidden');
+}
+
+async function loadLinkPorts(side) {
+  const swSel   = el(`link-sw-${side}`);
+  const portSel = el(`link-port-${side}`);
+  const switchId = swSel.value;
+  if (!switchId) {
+    portSel.innerHTML = '<option value="">— select port —</option>';
+    return;
+  }
+  const ports = await apiFetch(`/api/switches/${switchId}/ports`);
+  portSel.innerHTML = '<option value="">— select port —</option>' +
+    ports.map(p => {
+      const lbl = p.label || ('Port ' + p.port_number);
+      return `<option value="${p.id}">${esc(lbl)} (${p.port_type} · ${p.speed})</option>`;
+    }).join('');
+}
+
+async function addSwitchLink() {
+  const portAId = el('link-port-a').value;
+  const portBId = el('link-port-b').value;
+  el('link-form-error').textContent = '';
+  if (!portAId || !portBId) {
+    el('link-form-error').textContent = 'Select a port on both sides.';
+    return;
+  }
+  if (portAId === portBId) {
+    el('link-form-error').textContent = 'Cannot link a port to itself.';
+    return;
+  }
+  try {
+    await apiFetch('/api/switch-links', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port_a_id: parseInt(portAId), port_b_id: parseInt(portBId) }),
+    });
+    hideAddLinkForm();
+    await Promise.all([loadSwitchLinks(), loadTopology()]);
+  } catch (e) {
+    el('link-form-error').textContent = e.message || 'Failed to save link.';
+  }
+}
+
+async function deleteSwitchLink(id) {
+  try {
+    await apiFetch(`/api/switch-links/${id}`, { method: 'DELETE' });
+    await Promise.all([loadSwitchLinks(), loadTopology()]);
+  } catch (e) { console.error('deleteSwitchLink:', e); }
 }
 
 // ── ports modal ───────────────────────────────────────────────────────────────
@@ -597,7 +693,7 @@ function renderTopology(data) {
   const nodes = data.nodes.map(n => ({ ...n }));
   const edges = data.edges.map(e => ({ ...e }));
 
-  // parallel edge offsets
+  // assign mid-column offset so parallel edges between the same pair don't overlap
   const _pairCount = {}, _pairIdx = {};
   edges.forEach(e => {
     const k = [e.source, e.target].sort().join('|');
@@ -607,19 +703,20 @@ function renderTopology(data) {
     const k = [e.source, e.target].sort().join('|');
     const idx = (_pairIdx[k] = (_pairIdx[k] || 0) + 1);
     const total = _pairCount[k];
-    e.curveOffset = total === 1 ? 0 : (idx - (total + 1) / 2) * 44;
+    e.midOffset = total === 1 ? 0 : (idx - (total + 1) / 2) * 18;
   });
 
   if (topoSimulation) topoSimulation.stop();
   topoSimulation = d3.forceSimulation(nodes)
-    .force('link',      d3.forceLink(edges).id(d => d.id).distance(130))
-    .force('charge',    d3.forceManyBody().strength(d => d.type === 'switch' ? -600 : -250))
+    .force('link',      d3.forceLink(edges).id(d => d.id)
+                          .distance(d => d.type === 'switch_link' ? 220 : 130))
+    .force('charge',    d3.forceManyBody().strength(d => d.type === 'switch' ? -700 : -280))
     .force('center',    d3.forceCenter(W / 2, H / 2))
-    .force('collision', d3.forceCollide(42));
+    .force('collision', d3.forceCollide(46));
 
   const edgeG = g.append('g').attr('class', 'topo-edges');
   const edge = edgeG.selectAll('path').data(edges).join('path')
-    .attr('class', 'topo-edge topo-edge-port')
+    .attr('class', d => `topo-edge topo-edge-${d.type}`)
     .on('mouseenter', (ev, d) => showEdgeTip(ev, d))
     .on('mouseleave', hideEdgeTip);
 
@@ -646,11 +743,9 @@ function renderTopology(data) {
     edge.attr('d', d => {
       const sx = d.source.x, sy = d.source.y;
       const tx = d.target.x, ty = d.target.y;
-      if (!d.curveOffset) return `M${sx},${sy}L${tx},${ty}`;
-      const dx = tx - sx, dy = ty - sy;
-      const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      const mx = (sx + tx) / 2, my = (sy + ty) / 2;
-      return `M${sx},${sy}Q${mx + d.curveOffset * (-dy / len)},${my + d.curveOffset * (dx / len)},${tx},${ty}`;
+      // orthogonal H-V-H path: go horizontal to mid column, then vertical, then horizontal to target
+      const vx = (sx + tx) / 2 + d.midOffset;
+      return `M${sx},${sy} H${vx} V${ty} H${tx}`;
     });
     node.attr('transform', d => `translate(${d.x},${d.y})`);
   });
@@ -695,13 +790,16 @@ function closeNodeDetail() {
 let _edgeTip = null;
 
 function showEdgeTip(ev, d) {
-  if (!d.port) return;
+  const text = d.type === 'switch_link'
+    ? `${d.port_a} (${d.port_a_type}·${d.speed_a}) ↔ ${d.port_b} (${d.port_b_type}·${d.speed_b})`
+    : d.port ? `${d.port} · ${d.port_type} · ${d.speed}` : null;
+  if (!text) return;
   if (!_edgeTip) {
     _edgeTip = document.createElement('div');
     _edgeTip.className = 'edge-tooltip';
     document.body.appendChild(_edgeTip);
   }
-  _edgeTip.textContent = `${d.port} · ${d.port_type} · ${d.speed}`;
+  _edgeTip.textContent = text;
   _edgeTip.style.left = (ev.pageX + 12) + 'px';
   _edgeTip.style.top  = (ev.pageY - 8)  + 'px';
   _edgeTip.style.display = 'block';
