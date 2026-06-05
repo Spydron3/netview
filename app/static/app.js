@@ -192,7 +192,8 @@ function applyFilter() {
       (d.name        || '').toLowerCase().includes(q) ||
       (d.hostname    || '').toLowerCase().includes(q) ||
       (d.mac_address || '').toLowerCase().includes(q) ||
-      (d.vendor      || '').toLowerCase().includes(q)
+      (d.vendor      || '').toLowerCase().includes(q) ||
+      (d.room        || '').toLowerCase().includes(q)
     );
   });
 
