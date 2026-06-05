@@ -34,8 +34,9 @@ class Switch(Base):
     __tablename__ = "switches"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    ip_address = Column(String(45), unique=True, nullable=False)
-    name = Column(String(255), nullable=True)
+    ip_address  = Column(String(45),  unique=True, nullable=True)
+    mac_address = Column(String(17),  unique=True, nullable=True)
+    name        = Column(String(255), nullable=True)
 
 
 class SwitchPort(Base):

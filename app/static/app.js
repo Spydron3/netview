@@ -412,17 +412,23 @@ function renderSwitches(switches) {
     list.innerHTML = '<p class="empty-sw">No switches added yet.</p>';
     return;
   }
-  list.innerHTML = switches.map(sw => `
+  list.innerHTML = switches.map(sw => {
+    const label = sw.name || sw.ip_address || sw.mac_address;
+    const sub   = [sw.name ? (sw.ip_address || sw.mac_address) : null,
+                   `${sw.port_count} port${sw.port_count !== 1 ? 's' : ''}`]
+                  .filter(Boolean).join(' · ');
+    return `
     <div class="switch-row">
       <div class="switch-info" onclick="openPortsModal(${sw.id})" style="cursor:pointer;flex:1">
         <div>
-          <div class="switch-name">${esc(sw.name || sw.ip_address)}</div>
-          <div class="switch-meta">${sw.name ? esc(sw.ip_address) + ' · ' : ''}${sw.port_count} port${sw.port_count !== 1 ? 's' : ''}</div>
+          <div class="switch-name">${esc(label)}</div>
+          <div class="switch-meta">${esc(sub)}</div>
         </div>
       </div>
       <button class="btn btn-sm btn-ghost" onclick="openPortsModal(${sw.id})" title="Manage ports">Ports</button>
       <button class="btn-delete" onclick="deleteSwitch(${sw.id})" title="Remove switch">✕</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function showAddSwitchForm() {
@@ -432,18 +438,20 @@ function showAddSwitchForm() {
 function hideAddSwitchForm() {
   el('add-switch-form').classList.add('hidden');
   el('sw-ip').value = '';
+  el('sw-mac').value = '';
   el('sw-name').value = '';
   el('sw-form-error').textContent = '';
 }
 
 async function addSwitch() {
-  const ip = el('sw-ip').value.trim();
-  if (!ip) { el('sw-form-error').textContent = 'IP address is required.'; return; }
+  const ip  = el('sw-ip').value.trim()  || null;
+  const mac = el('sw-mac').value.trim() || null;
+  if (!ip && !mac) { el('sw-form-error').textContent = 'IP address or MAC address is required.'; return; }
   try {
     await apiFetch('/api/switches', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip_address: ip, name: el('sw-name').value.trim() || null }),
+      body: JSON.stringify({ ip_address: ip, mac_address: mac, name: el('sw-name').value.trim() || null }),
     });
     hideAddSwitchForm();
     await loadSwitches();

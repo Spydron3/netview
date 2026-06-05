@@ -45,6 +45,14 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                     conn.execute(text(
                         f"ALTER TABLE switches DROP COLUMN IF EXISTS {col}"
                     ))
+                # allow MAC-only unmanaged switches
+                conn.execute(text(
+                    "ALTER TABLE switches ALTER COLUMN ip_address DROP NOT NULL"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE switches ADD COLUMN IF NOT EXISTS "
+                    "mac_address VARCHAR(17) UNIQUE"
+                ))
                 # drop legacy topology_links table
                 conn.execute(text("DROP TABLE IF EXISTS topology_links"))
                 # migrate switch_ports.device_id → port_connections (M:N table)

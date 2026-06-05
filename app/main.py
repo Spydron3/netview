@@ -26,6 +26,15 @@ _VALID_PORT_TYPES = {"RJ45", "SFP+"}
 _VALID_SPEEDS     = {"10M", "100M", "1G", "2.5G", "10G", "25G", "40G", "100G"}
 
 
+def _norm_mac(mac: str | None) -> str | None:
+    if not mac:
+        return None
+    digits = mac.strip().lower().replace(":", "").replace("-", "").replace(".", "")
+    if len(digits) != 12 or not all(c in "0123456789abcdef" for c in digits):
+        raise ValueError(f"Invalid MAC address: {mac!r}")
+    return ":".join(digits[i:i+2] for i in range(0, 12, 2))
+
+
 def _run_scan() -> None:
     if not _scan_lock.acquire(blocking=False):
         logger.info("Scan already running — skipping")
@@ -328,14 +337,19 @@ def api_scan_history():
 # ── switches ──────────────────────────────────────────────────────────────────
 
 class SwitchCreate(BaseModel):
-    ip_address: str
-    name: str | None = None
+    ip_address:  str | None = None
+    mac_address: str | None = None
+    name:        str | None = None
 
 
 @app.get("/api/switches")
 def api_list_switches():
     with get_db() as db:
-        rows = db.execute(sa.select(Switch).order_by(Switch.ip_address)).scalars().all()
+        rows = db.execute(
+            sa.select(Switch).order_by(
+                Switch.ip_address.nullslast(), Switch.mac_address
+            )
+        ).scalars().all()
         switch_ids = [s.id for s in rows]
         counts = {}
         if switch_ids:
@@ -350,13 +364,19 @@ def api_list_switches():
 
 @app.post("/api/switches", status_code=201)
 def api_add_switch(body: SwitchCreate):
+    ip  = body.ip_address.strip()  if body.ip_address  else None
+    try:
+        mac = _norm_mac(body.mac_address)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if not ip and not mac:
+        raise HTTPException(status_code=422, detail="ip_address or mac_address is required")
     with get_db() as db:
-        existing = db.execute(
-            sa.select(Switch).where(Switch.ip_address == body.ip_address)
-        ).scalar_one_or_none()
-        if existing:
-            raise HTTPException(status_code=409, detail="Switch already exists")
-        sw = Switch(ip_address=body.ip_address, name=body.name)
+        if ip and db.execute(sa.select(Switch).where(Switch.ip_address == ip)).scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="A switch with that IP already exists")
+        if mac and db.execute(sa.select(Switch).where(Switch.mac_address == mac)).scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="A switch with that MAC already exists")
+        sw = Switch(ip_address=ip, mac_address=mac, name=body.name or None)
         db.add(sw)
         db.flush()
         return _switch_to_dict(sw, 0)
@@ -373,12 +393,20 @@ def api_delete_switch(switch_id: int):
 
 @app.patch("/api/switches/{switch_id}")
 def api_update_switch(switch_id: int, body: SwitchCreate):
+    ip  = body.ip_address.strip()  if body.ip_address  else None
+    try:
+        mac = _norm_mac(body.mac_address)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if not ip and not mac:
+        raise HTTPException(status_code=422, detail="ip_address or mac_address is required")
     with get_db() as db:
         sw = db.get(Switch, switch_id)
         if not sw:
             raise HTTPException(status_code=404, detail="Switch not found")
-        sw.ip_address = body.ip_address
-        sw.name = body.name
+        sw.ip_address  = ip
+        sw.mac_address = mac
+        sw.name        = body.name or None
         port_count = db.execute(
             sa.select(sa.func.count(SwitchPort.id)).where(SwitchPort.switch_id == switch_id)
         ).scalar_one()
@@ -589,21 +617,26 @@ def api_topology():
         edges: list[dict] = []
         seen: set[str] = set()
 
-        # Match devices → switches by IP and MAC to avoid duplicate nodes
-        sw_by_ip: dict[str, Switch] = {sw.ip_address: sw for sw in switches}
-        sw_by_mac: dict[str, Switch] = {}
+        # Match devices → switches by IP and MAC to avoid duplicate nodes.
+        # MAC lookup: prefer the MAC stored on the switch row; fall back to
+        # finding a device record with the same IP (covers IP-only switches).
+        sw_by_ip:  dict[str, Switch] = {sw.ip_address:  sw for sw in switches if sw.ip_address}
+        sw_by_mac: dict[str, Switch] = {sw.mac_address.lower(): sw for sw in switches if sw.mac_address}
         for sw in switches:
-            dev_row = db.execute(
-                sa.select(Device).where(Device.ip_address == sw.ip_address)
-            ).scalar_one_or_none()
-            if dev_row and dev_row.mac_address:
-                sw_by_mac[dev_row.mac_address.lower()] = sw
+            if not sw.mac_address and sw.ip_address:
+                dev_row = db.execute(
+                    sa.select(Device).where(Device.ip_address == sw.ip_address)
+                ).scalar_one_or_none()
+                if dev_row and dev_row.mac_address:
+                    mac_lower = dev_row.mac_address.lower()
+                    if mac_lower not in sw_by_mac:
+                        sw_by_mac[mac_lower] = sw
 
         for sw in switches:
             nid = f"sw_{sw.id}"
             nodes.append({
                 "id": nid, "type": "switch",
-                "label": sw.name or sw.ip_address,
+                "label": _sw_label(sw),
                 "ip": sw.ip_address, "name": sw.name,
             })
             seen.add(nid)
@@ -669,16 +702,21 @@ def _switch_to_dict(s: Switch, port_count: int = 0) -> dict:
     return {
         "id": s.id,
         "ip_address": s.ip_address,
+        "mac_address": s.mac_address,
         "name": s.name,
         "port_count": port_count,
     }
+
+
+def _sw_label(sw: Switch) -> str:
+    return _sw_label(sw) or sw.mac_address or f"Switch {sw.id}"
 
 
 def _port_to_dict(p: SwitchPort, sw: Switch, dev: Device | None) -> dict:
     return {
         "id": p.id,
         "switch_id": p.switch_id,
-        "switch_name": sw.name or sw.ip_address,
+        "switch_name": _sw_label(sw),
         "switch_ip": sw.ip_address,
         "port_number": p.port_number,
         "label": p.label,
@@ -708,7 +746,7 @@ def _device_to_dict(d: Device, ports: list | None = None) -> dict:
             {
                 "id": p.id,
                 "switch_id": sw.id,
-                "switch_name": sw.name or sw.ip_address,
+                "switch_name": _sw_label(sw),
                 "switch_ip": sw.ip_address,
                 "port_number": p.port_number,
                 "label": p.label,
@@ -725,7 +763,7 @@ def _link_to_dict(lnk: SwitchLink, sw_a: Switch, pa: SwitchPort, sw_b: Switch, p
         return {
             "id": port.id,
             "switch_id": sw.id,
-            "switch_name": sw.name or sw.ip_address,
+            "switch_name": _sw_label(sw),
             "port_number": port.port_number,
             "label": port.label,
             "port_type": port.port_type,
