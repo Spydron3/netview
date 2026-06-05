@@ -201,6 +201,23 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                         END IF;
                     END $$
                 """))
+                # generalised port-link: port_a_id nullable + dev_port_id_b for device-device links
+                conn.execute(text("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name='port_links' AND column_name='port_a_id'
+                            AND is_nullable='NO'
+                        ) THEN
+                            ALTER TABLE port_links ALTER COLUMN port_a_id DROP NOT NULL;
+                        END IF;
+                    END $$
+                """))
+                conn.execute(text(
+                    "ALTER TABLE port_links ADD COLUMN IF NOT EXISTS "
+                    "dev_port_id_b INTEGER UNIQUE REFERENCES device_ports(id) ON DELETE CASCADE"
+                ))
                 # seed default settings from env vars on first run
                 defaults = {
                     "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),

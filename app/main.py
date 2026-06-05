@@ -404,6 +404,173 @@ def api_disconnect_device_port(device_id: int, port_id: int):
         db.delete(lnk)
 
 
+# ── unified port links ────────────────────────────────────────────────────────
+
+class PortLinkCreate(BaseModel):
+    device_a_id:     int
+    switch_port_a_id: int | None = None
+    device_b_id:     int
+    switch_port_b_id: int | None = None
+
+
+def _port_already_linked(db, sp_id: int) -> bool:
+    return db.execute(
+        sa.select(PortLink).where(
+            sa.or_(PortLink.port_a_id == sp_id, PortLink.port_b_id == sp_id)
+        )
+    ).scalar_one_or_none() is not None
+
+
+def _dev_port_already_linked(db, dp_id: int) -> bool:
+    return db.execute(
+        sa.select(PortLink).where(
+            sa.or_(PortLink.dev_port_id == dp_id, PortLink.dev_port_id_b == dp_id)
+        )
+    ).scalar_one_or_none() is not None
+
+
+@app.get("/api/devices/{device_id}/connections")
+def api_device_connections(device_id: int):
+    """All port connections for a device (all link types)."""
+    with get_db() as db:
+        if not db.get(Device, device_id):
+            raise HTTPException(status_code=404, detail="Device not found")
+        result = []
+
+        # switch port → this device's DevicePort
+        for lnk, sp, dp in db.execute(
+            sa.select(PortLink, SwitchPort, DevicePort)
+            .join(DevicePort, DevicePort.id == PortLink.dev_port_id)
+            .join(SwitchPort, SwitchPort.id == PortLink.port_a_id)
+            .where(DevicePort.device_id == device_id)
+        ).all():
+            other_sw = db.get(Device, sp.switch_id)
+            result.append({
+                "link_id": lnk.id,
+                "other_device_id": sp.switch_id,
+                "other_device_label": _sw_label(other_sw) if other_sw else "?",
+                "other_device_is_switch": other_sw.is_switch if other_sw else False,
+                "port_label": sp.label or f"Port {sp.port_number}",
+                "port_type": sp.port_type,
+                "speed": sp.speed,
+            })
+
+        # dev-dev links where this device is side A
+        for lnk, dp_a in db.execute(
+            sa.select(PortLink, DevicePort)
+            .join(DevicePort, DevicePort.id == PortLink.dev_port_id)
+            .where(
+                DevicePort.device_id == device_id,
+                PortLink.dev_port_id_b.isnot(None),
+                PortLink.port_a_id.is_(None),
+            )
+        ).all():
+            dp_b = db.get(DevicePort, lnk.dev_port_id_b)
+            other = db.get(Device, dp_b.device_id) if dp_b else None
+            result.append({
+                "link_id": lnk.id,
+                "other_device_id": other.id if other else None,
+                "other_device_label": (other.name or other.hostname or other.ip_address) if other else "?",
+                "other_device_is_switch": other.is_switch if other else False,
+                "port_label": None, "port_type": None, "speed": None,
+            })
+
+        # dev-dev links where this device is side B
+        for lnk, dp_b in db.execute(
+            sa.select(PortLink, DevicePort)
+            .join(DevicePort, DevicePort.id == PortLink.dev_port_id_b)
+            .where(
+                DevicePort.device_id == device_id,
+                PortLink.port_a_id.is_(None),
+            )
+        ).all():
+            dp_a = db.get(DevicePort, lnk.dev_port_id)
+            other = db.get(Device, dp_a.device_id) if dp_a else None
+            result.append({
+                "link_id": lnk.id,
+                "other_device_id": other.id if other else None,
+                "other_device_label": (other.name or other.hostname or other.ip_address) if other else "?",
+                "other_device_is_switch": other.is_switch if other else False,
+                "port_label": None, "port_type": None, "speed": None,
+            })
+
+        return result
+
+
+@app.post("/api/port-link", status_code=201)
+def api_create_port_link(body: PortLinkCreate):
+    with get_db() as db:
+        dev_a = db.get(Device, body.device_a_id)
+        dev_b = db.get(Device, body.device_b_id)
+        if not dev_a: raise HTTPException(404, "Device A not found")
+        if not dev_b: raise HTTPException(404, "Device B not found")
+        if dev_a.id == dev_b.id: raise HTTPException(422, "Cannot link a device to itself")
+
+        sp_a = sp_b = dp_a = dp_b = None
+
+        if body.switch_port_a_id is not None:
+            sp_a = db.get(SwitchPort, body.switch_port_a_id)
+            if not sp_a or sp_a.switch_id != dev_a.id:
+                raise HTTPException(404, "Port A not found on device A")
+            if _port_already_linked(db, sp_a.id):
+                raise HTTPException(409, "Port A is already connected")
+        elif not dev_a.is_switch:
+            dp_a = db.execute(
+                sa.select(DevicePort).where(DevicePort.device_id == dev_a.id)
+            ).scalars().first()
+            if not dp_a:
+                dp_a = DevicePort(device_id=dev_a.id, label="Port")
+                db.add(dp_a)
+                db.flush()
+            if _dev_port_already_linked(db, dp_a.id):
+                raise HTTPException(409, "Device A already has a connection")
+        else:
+            raise HTTPException(422, "switch_port_a_id required for switch device A")
+
+        if body.switch_port_b_id is not None:
+            sp_b = db.get(SwitchPort, body.switch_port_b_id)
+            if not sp_b or sp_b.switch_id != dev_b.id:
+                raise HTTPException(404, "Port B not found on device B")
+            if _port_already_linked(db, sp_b.id):
+                raise HTTPException(409, "Port B is already connected")
+        elif not dev_b.is_switch:
+            dp_b = db.execute(
+                sa.select(DevicePort).where(DevicePort.device_id == dev_b.id)
+            ).scalars().first()
+            if not dp_b:
+                dp_b = DevicePort(device_id=dev_b.id, label="Port")
+                db.add(dp_b)
+                db.flush()
+            if _dev_port_already_linked(db, dp_b.id):
+                raise HTTPException(409, "Device B already has a connection")
+        else:
+            raise HTTPException(422, "switch_port_b_id required for switch device B")
+
+        if sp_a and sp_b:
+            lnk = PortLink(port_a_id=sp_a.id, port_b_id=sp_b.id)
+        elif sp_a and dp_b:
+            lnk = PortLink(port_a_id=sp_a.id, dev_port_id=dp_b.id)
+        elif dp_a and sp_b:
+            lnk = PortLink(port_a_id=sp_b.id, dev_port_id=dp_a.id)
+        elif dp_a and dp_b:
+            lnk = PortLink(dev_port_id=dp_a.id, dev_port_id_b=dp_b.id)
+        else:
+            raise HTTPException(422, "Invalid port combination")
+
+        db.add(lnk)
+        db.flush()
+        return {"id": lnk.id}
+
+
+@app.delete("/api/port-link/{link_id}", status_code=204)
+def api_delete_port_link(link_id: int):
+    with get_db() as db:
+        lnk = db.get(PortLink, link_id)
+        if not lnk:
+            raise HTTPException(status_code=404, detail="Link not found")
+        db.delete(lnk)
+
+
 # ── settings ──────────────────────────────────────────────────────────────────
 
 class SettingsUpdate(BaseModel):
@@ -621,8 +788,9 @@ def api_list_ports(switch_id: int):
         sw = db.get(Device, switch_id)
         if not sw or not sw.is_switch:
             raise HTTPException(status_code=404, detail="Switch not found")
+
         rows = db.execute(
-            sa.select(SwitchPort, Device)
+            sa.select(SwitchPort, Device, PortLink)
             .outerjoin(PortLink, sa.and_(
                 PortLink.port_a_id == SwitchPort.id, PortLink.dev_port_id.isnot(None)
             ))
@@ -631,7 +799,56 @@ def api_list_ports(switch_id: int):
             .where(SwitchPort.switch_id == switch_id)
             .order_by(SwitchPort.port_number)
         ).all()
-        return [_port_to_dict(p, sw, d) for p, d in rows]
+
+        port_ids = [p.id for p, d, l in rows]
+
+        # Bulk-fetch switch-to-switch links where any of these ports appear
+        sw_links = db.execute(
+            sa.select(PortLink).where(
+                sa.and_(
+                    sa.or_(PortLink.port_a_id.in_(port_ids), PortLink.port_b_id.in_(port_ids)),
+                    PortLink.port_b_id.isnot(None),
+                )
+            )
+        ).scalars().all()
+
+        sw_link_by_port: dict[int, tuple] = {}
+        other_port_ids: set[int] = set()
+        for lnk in sw_links:
+            if lnk.port_a_id in port_ids:
+                sw_link_by_port[lnk.port_a_id] = (lnk, lnk.port_b_id)
+                other_port_ids.add(lnk.port_b_id)
+            if lnk.port_b_id in port_ids:
+                sw_link_by_port[lnk.port_b_id] = (lnk, lnk.port_a_id)
+                other_port_ids.add(lnk.port_a_id)
+
+        other_ports: dict[int, SwitchPort] = {}
+        if other_port_ids:
+            for op in db.execute(
+                sa.select(SwitchPort).where(SwitchPort.id.in_(other_port_ids))
+            ).scalars().all():
+                other_ports[op.id] = op
+
+        other_switch_ids = {op.switch_id for op in other_ports.values()}
+        other_switches: dict[int, Device] = {}
+        if other_switch_ids:
+            for osw in db.execute(
+                sa.select(Device).where(Device.id.in_(other_switch_ids))
+            ).scalars().all():
+                other_switches[osw.id] = osw
+
+        result = []
+        for p, d, dev_lnk in rows:
+            link_id = dev_lnk.id if dev_lnk else None
+            conn_dev = d
+            if not conn_dev and p.id in sw_link_by_port:
+                lnk_sw, other_port_id = sw_link_by_port[p.id]
+                link_id = lnk_sw.id
+                op = other_ports.get(other_port_id)
+                if op:
+                    conn_dev = other_switches.get(op.switch_id)
+            result.append(_port_to_dict(p, sw, conn_dev, link_id))
+        return result
 
 
 @app.post("/api/switches/{switch_id}/ports", status_code=201)
@@ -720,68 +937,6 @@ def api_all_ports():
         return [_port_to_dict(p, s, d) for p, s, d in rows]
 
 
-# ── switch links ──────────────────────────────────────────────────────────────
-
-class SwitchLinkCreate(BaseModel):
-    port_a_id: int
-    port_b_id: int
-
-
-@app.get("/api/switch-links")
-def api_list_switch_links():
-    with get_db() as db:
-        links = db.execute(
-            sa.select(PortLink).where(PortLink.port_b_id.isnot(None))
-        ).scalars().all()
-        result = []
-        for lnk in links:
-            pa  = db.get(SwitchPort, lnk.port_a_id)
-            pb  = db.get(SwitchPort, lnk.port_b_id)
-            sw_a = db.get(Device, pa.switch_id) if pa else None
-            sw_b = db.get(Device, pb.switch_id) if pb else None
-            if pa and pb and sw_a and sw_b:
-                result.append(_link_to_dict(lnk, sw_a, pa, sw_b, pb))
-        return result
-
-
-@app.post("/api/switch-links", status_code=201)
-def api_add_switch_link(body: SwitchLinkCreate):
-    with get_db() as db:
-        pa = db.get(SwitchPort, body.port_a_id)
-        pb = db.get(SwitchPort, body.port_b_id)
-        if not pa:
-            raise HTTPException(status_code=404, detail="Port A not found")
-        if not pb:
-            raise HTTPException(status_code=404, detail="Port B not found")
-        if pa.switch_id == pb.switch_id:
-            raise HTTPException(status_code=422, detail="Cannot link ports on the same switch")
-        if body.port_a_id == body.port_b_id:
-            raise HTTPException(status_code=422, detail="Cannot link a port to itself")
-        # ensure neither port is already in a link
-        for pid in (body.port_a_id, body.port_b_id):
-            if db.execute(
-                sa.select(PortLink).where(
-                    sa.or_(PortLink.port_a_id == pid, PortLink.port_b_id == pid)
-                )
-            ).scalar_one_or_none():
-                raise HTTPException(status_code=409, detail=f"Port {pid} is already linked")
-        lnk = PortLink(port_a_id=body.port_a_id, port_b_id=body.port_b_id)
-        db.add(lnk)
-        db.flush()
-        sw_a = db.get(Device, pa.switch_id)
-        sw_b = db.get(Device, pb.switch_id)
-        return _link_to_dict(lnk, sw_a, pa, sw_b, pb)
-
-
-@app.delete("/api/switch-links/{link_id}", status_code=204)
-def api_delete_switch_link(link_id: int):
-    with get_db() as db:
-        lnk = db.get(PortLink, link_id)
-        if not lnk or lnk.port_b_id is None:
-            raise HTTPException(status_code=404, detail="Link not found")
-        db.delete(lnk)
-
-
 # ── topology (manual) ─────────────────────────────────────────────────────────
 
 @app.get("/api/topology")
@@ -849,7 +1004,7 @@ def api_topology():
                         "port": port.label or f"Port {port.port_number}",
                         "port_type": port.port_type,
                         "speed": port.speed,
-                        "type": "port",
+                        "type": "switch_link",
                     }
             else:
                 tgt = f"dev_{dev.id}"
@@ -898,6 +1053,35 @@ def api_topology():
         for key, edge in sw_port_edges.items():
             if key not in sw_link_pairs:
                 edges.append(edge)
+
+        # Device-to-device direct links
+        dev_links = db.execute(
+            sa.select(PortLink, DevicePort)
+            .join(DevicePort, DevicePort.id == PortLink.dev_port_id)
+            .where(PortLink.port_a_id.is_(None), PortLink.dev_port_id_b.isnot(None))
+        ).all()
+        for lnk, dp_a in dev_links:
+            dp_b = db.get(DevicePort, lnk.dev_port_id_b)
+            if not dp_b:
+                continue
+            dev_a = db.get(Device, dp_a.device_id)
+            dev_b = db.get(Device, dp_b.device_id)
+            if not dev_a or not dev_b or dev_a.is_virtual or dev_b.is_virtual:
+                continue
+            src = f"dev_{dev_a.id}"
+            tgt = f"dev_{dev_b.id}"
+            for _d, _nid in [(dev_a, src), (dev_b, tgt)]:
+                if _nid not in seen:
+                    nodes.append({
+                        "id": _nid, "type": "device",
+                        "label": _d.name or _d.hostname or _d.ip_address or f"Device {_d.id}",
+                        "ip": _d.ip_address, "mac": _d.mac_address,
+                        "hostname": _d.hostname, "vendor": _d.vendor,
+                        "name": _d.name, "is_online": _d.is_online,
+                        "is_wireless": _d.is_wireless,
+                    })
+                    seen.add(_nid)
+            edges.append({"source": src, "target": tgt, "type": "device_link"})
 
         # Always include wireless devices even without a switch port connection
         wireless_devs = db.execute(
@@ -992,7 +1176,7 @@ def _sw_label(sw: Device) -> str:
     return sw.name or sw.ip_address or sw.mac_address or f"Switch {sw.id}"
 
 
-def _port_to_dict(p: SwitchPort, sw: Device, dev: Device | None) -> dict:
+def _port_to_dict(p: SwitchPort, sw: Device, dev: Device | None, link_id: int | None = None) -> dict:
     return {
         "id": p.id,
         "switch_id": p.switch_id,
@@ -1002,8 +1186,10 @@ def _port_to_dict(p: SwitchPort, sw: Device, dev: Device | None) -> dict:
         "label": p.label,
         "port_type": p.port_type,
         "speed": p.speed,
+        "link_id": link_id,
         "device_id": dev.id if dev else None,
         "device_label": (dev.name or dev.hostname or dev.ip_address) if dev else None,
+        "device_is_switch": dev.is_switch if dev else False,
     }
 
 
@@ -1043,27 +1229,6 @@ def _device_to_dict(d: Device, ports: list | None = None) -> dict:
         ],
     }
 
-
-def _link_to_dict(lnk: PortLink, sw_a: Device, pa: SwitchPort, sw_b: Device, pb: SwitchPort) -> dict:
-    def _p(port: SwitchPort, sw: Device) -> dict:
-        return {
-            "id": port.id,
-            "switch_id": sw.id,
-            "switch_name": _sw_label(sw),
-            "port_number": port.port_number,
-            "label": port.label,
-            "port_type": port.port_type,
-            "speed": port.speed,
-        }
-    return {
-        "id": lnk.id,
-        "switch_a_id": sw_a.id,
-        "port_a_id": lnk.port_a_id,
-        "switch_b_id": sw_b.id,
-        "port_b_id": lnk.port_b_id,
-        "port_a": _p(pa, sw_a),
-        "port_b": _p(pb, sw_b),
-    }
 
 
 def _scan_to_dict(s: ScanRun | None) -> dict | None:

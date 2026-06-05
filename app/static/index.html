@@ -134,39 +134,6 @@
 
         <div id="switches-list"></div>
 
-        <div class="switches-panel-header switches-panel-section">
-          <h3>Switch Links</h3>
-          <button class="btn btn-sm" onclick="showAddLinkForm()">+ Add</button>
-        </div>
-
-        <div id="add-link-form" class="add-link-form hidden">
-          <div class="link-form-group">
-            <label>Switch A</label>
-            <select id="link-sw-a" class="port-select link-select" onchange="loadLinkPorts('a')">
-              <option value="">— select switch —</option>
-            </select>
-            <select id="link-port-a" class="port-select link-select">
-              <option value="">— select port —</option>
-            </select>
-          </div>
-          <div class="link-form-group">
-            <label>Switch B</label>
-            <select id="link-sw-b" class="port-select link-select" onchange="loadLinkPorts('b')">
-              <option value="">— select switch —</option>
-            </select>
-            <select id="link-port-b" class="port-select link-select">
-              <option value="">— select port —</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <button class="btn btn-sm" onclick="addSwitchLink()">Save</button>
-            <button class="btn btn-sm btn-ghost" onclick="hideAddLinkForm()">Cancel</button>
-          </div>
-          <p id="link-form-error" class="form-error"></p>
-        </div>
-
-        <div id="links-list"></div>
-
       </div>
 
     </div>
@@ -302,6 +269,25 @@
         <p id="ports-empty" class="empty-sw hidden">No ports configured yet.</p>
       </div>
 
+      <!-- connect port section (shown per port row) -->
+      <div class="add-port-section" id="port-connect-section" style="display:none">
+        <div class="add-port-header">Connect <span id="pc-port-label-val"></span></div>
+        <div class="add-port-form">
+          <div class="add-port-row">
+            <label>Device</label>
+            <select id="pc-device" class="port-select" onchange="loadPCDevicePorts()">
+              <option value="">— select device —</option>
+            </select>
+            <select id="pc-dev-port" class="port-select" style="display:none">
+              <option value="">— select port —</option>
+            </select>
+            <button class="btn btn-sm" onclick="savePortConnect()">Connect</button>
+            <button class="btn btn-sm btn-ghost" onclick="closePortConnect()">Cancel</button>
+          </div>
+          <p id="pc-error" class="form-error"></p>
+        </div>
+      </div>
+
       <!-- add port section -->
       <div class="add-port-section">
         <div class="add-port-header">Add ports</div>
@@ -350,29 +336,13 @@
     </div>
     <div class="modal-body" style="padding:0; overflow-y:auto; max-height:calc(100vh - 220px)">
 
-      <!-- interfaces section -->
-      <div class="add-port-section">
-        <div class="add-port-header">Interfaces</div>
-        <div id="dp-ifaces-list" class="dp-ifaces-list"></div>
-        <div class="add-port-form">
-          <div class="add-port-row">
-            <input id="dp-iface-label" type="text" placeholder="e.g. eth0, NIC 1" class="port-input" />
-            <button class="btn btn-sm" onclick="addDeviceInterface()">Add Interface</button>
-            <span id="dp-iface-error" class="form-error"></span>
-          </div>
-        </div>
-      </div>
-
       <!-- connections table -->
       <div id="device-ports-table-wrap">
         <table class="ports-table">
           <thead>
             <tr>
-              <th>Interface</th>
-              <th>Switch</th>
+              <th>Device</th>
               <th>Port</th>
-              <th>Type</th>
-              <th>Speed</th>
               <th></th>
             </tr>
           </thead>
@@ -386,19 +356,14 @@
         <div class="add-port-header">Add connection</div>
         <div class="add-port-form">
           <div class="add-port-row">
-            <label>Interface</label>
-            <select id="dp-dev-port" class="port-select">
-              <option value="">— select interface —</option>
+            <label>Device</label>
+            <select id="dp-target-device" class="port-select" onchange="loadDPTargetPorts()">
+              <option value="">— select device —</option>
             </select>
-            <label>Switch</label>
-            <select id="dp-switch" class="port-select" onchange="loadDevicePortOptions()">
-              <option value="">— select switch —</option>
-            </select>
-            <label>Port</label>
-            <select id="dp-port" class="port-select">
+            <select id="dp-target-port" class="port-select" style="display:none">
               <option value="">— select port —</option>
             </select>
-            <button class="btn btn-sm" onclick="connectDevicePort()">Connect</button>
+            <button class="btn btn-sm" onclick="connectDP()">Connect</button>
           </div>
           <p id="dp-error" class="form-error"></p>
         </div>

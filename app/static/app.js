@@ -218,11 +218,11 @@ function renderDevices(devices) {
             : `<span class="port-chip">${p.port}</span>`).join('')}
           ${extra > 0 ? `<span class="port-more">+${extra} more</span>` : ''}
         </div>` : ''}
-      <button class="btn btn-sm btn-ghost device-ports-btn" onclick="openDevicePortsModal(${d.id})">
+      ${!d.is_switch ? `<button class="btn btn-sm btn-ghost device-ports-btn" onclick="openDevicePortsModal(${d.id})">
         ${(d.switch_ports || []).length > 0
           ? `${d.switch_ports.length} port${d.switch_ports.length !== 1 ? 's' : ''}`
           : 'Assign port'}
-      </button>
+      </button>` : ''}
       <div class="device-virtual-row">
         <label class="device-virtual-label">
           <input type="checkbox" ${d.is_wireless ? 'checked' : ''} onchange="toggleWireless(${d.id}, this.checked)" />
@@ -307,17 +307,11 @@ async function openDevicePortsModal(deviceId) {
   el('dp-error').textContent = '';
 
   const dev = allDevices.find(d => d.id === deviceId);
-  el('device-ports-modal-title').textContent = dev ? (dev.name || dev.ip_address) : 'Device';
-  el('device-ports-modal-sub').textContent   = dev?.name ? dev.ip_address : '';
-
-  // populate switch dropdown
-  const switches = await apiFetch('/api/switches');
-  el('dp-switch').innerHTML = '<option value="">— select switch —</option>' +
-    switches.map(s => `<option value="${s.id}">${esc(s.name || s.ip_address)}</option>`).join('');
-  el('dp-port').innerHTML = '<option value="">— select port —</option>';
+  el('device-ports-modal-title').textContent = dev ? (dev.name || dev.ip_address || 'Device') : 'Device';
+  el('device-ports-modal-sub').textContent   = dev?.name ? (dev.ip_address || '') : '';
 
   el('device-ports-modal').classList.remove('hidden');
-  await refreshDevicePortsModal();
+  await Promise.all([refreshDevicePortsModal(), _loadDPTargetDevices()]);
 }
 
 function closeDevicePortsModal() {
@@ -327,126 +321,85 @@ function closeDevicePortsModal() {
 
 async function refreshDevicePortsModal() {
   if (!_devicePortsModalId) return;
-  const [dev, ifaces] = await Promise.all([
-    apiFetch(`/api/devices/${_devicePortsModalId}`),
-    apiFetch(`/api/devices/${_devicePortsModalId}/device-ports`),
-  ]);
+  const connections = await apiFetch(`/api/devices/${_devicePortsModalId}/connections`);
 
-  // keep allDevices in sync
-  const idx = allDevices.findIndex(d => d.id === _devicePortsModalId);
-  if (idx >= 0) allDevices[idx] = dev;
-
-  // render interfaces list
-  const ifaceList = el('dp-ifaces-list');
-  ifaceList.innerHTML = ifaces.length
-    ? ifaces.map(i => `
-        <div class="dp-iface-row">
-          <span class="dp-iface-label">${esc(i.label)}</span>
-          <button class="btn-delete" onclick="removeDeviceInterface(${i.id})" title="Remove">✕</button>
-        </div>`).join('')
-    : '<p class="empty-sw" style="padding:6px 16px">No interfaces defined.</p>';
-
-  // populate interface dropdown in "add connection"
-  const dpSel = el('dp-dev-port');
-  const connectedDpIds = new Set((dev.switch_ports || []).map(p => p.dev_port_id));
-  dpSel.innerHTML = '<option value="">— select interface —</option>' +
-    ifaces.filter(i => !connectedDpIds.has(i.id))
-      .map(i => `<option value="${i.id}">${esc(i.label)}</option>`).join('');
-
-  // render connections table
-  const ports = dev.switch_ports || [];
   const tbody = el('device-ports-tbody');
   const empty = el('device-ports-empty');
-  if (!ports.length) {
+  if (!connections.length) {
     tbody.innerHTML = '';
     empty.classList.remove('hidden');
   } else {
     empty.classList.add('hidden');
-    tbody.innerHTML = ports.map(p => `
-      <tr>
-        <td><code>${esc(p.dev_port_label)}</code></td>
-        <td>${esc(p.switch_name)}</td>
-        <td>${esc(p.label || ('Port ' + p.port_number))}</td>
-        <td><span class="port-type-badge">${esc(p.port_type)}</span></td>
-        <td>${esc(p.speed)}</td>
-        <td><button class="btn-delete" onclick="disconnectDevicePort(${p.id})" title="Disconnect">✕</button></td>
-      </tr>`).join('');
+    tbody.innerHTML = connections.map(c => {
+      const portCell = c.port_label
+        ? `${esc(c.port_label)}${c.port_type ? ` <span class="port-type-badge">${esc(c.port_type)}</span>` : ''}${c.speed ? ` ${esc(c.speed)}` : ''}`
+        : '<span class="port-no-device">direct</span>';
+      return `<tr>
+        <td>${esc(c.other_device_label)}</td>
+        <td>${portCell}</td>
+        <td><button class="btn-delete" onclick="disconnectPort(${c.link_id})" title="Disconnect">✕</button></td>
+      </tr>`;
+    }).join('');
   }
 }
 
-async function addDeviceInterface() {
-  const label = el('dp-iface-label').value.trim();
-  el('dp-iface-error').textContent = '';
-  if (!label) { el('dp-iface-error').textContent = 'Enter a label.'; return; }
+async function _loadDPTargetDevices() {
+  const devices = await apiFetch('/api/devices');
+  el('dp-target-device').innerHTML = '<option value="">— select device —</option>' +
+    devices
+      .filter(d => d.id !== _devicePortsModalId && !d.is_virtual)
+      .map(d => `<option value="${d.id}" data-is-switch="${d.is_switch}">${esc(d.name || d.ip_address || d.mac_address || 'Device ' + d.id)}</option>`)
+      .join('');
+  el('dp-target-port').style.display = 'none';
+  el('dp-target-port').innerHTML = '<option value="">— select port —</option>';
+}
+
+async function loadDPTargetPorts() {
+  const sel = el('dp-target-device');
+  const deviceId = sel.value;
+  const portSel = el('dp-target-port');
+  if (!deviceId) { portSel.style.display = 'none'; return; }
+
+  const isSwitch = sel.options[sel.selectedIndex]?.getAttribute('data-is-switch') === 'true';
+  if (isSwitch) {
+    const ports = await apiFetch(`/api/switches/${deviceId}/ports`);
+    portSel.innerHTML = '<option value="">— select port —</option>' +
+      ports.filter(p => !p.link_id).map(p => {
+        const lbl = p.label || ('Port ' + p.port_number);
+        return `<option value="${p.id}">${esc(lbl)} (${p.port_type}·${p.speed})</option>`;
+      }).join('');
+    portSel.style.display = '';
+  } else {
+    portSel.style.display = 'none';
+  }
+}
+
+async function connectDP() {
+  const sel = el('dp-target-device');
+  const targetDeviceId = parseInt(sel.value);
+  const isSwitch = sel.options[sel.selectedIndex]?.getAttribute('data-is-switch') === 'true';
+  const targetPortId = isSwitch ? parseInt(el('dp-target-port').value) || null : null;
+  el('dp-error').textContent = '';
+  if (!targetDeviceId) { el('dp-error').textContent = 'Select a device.'; return; }
+  if (isSwitch && !targetPortId) { el('dp-error').textContent = 'Select a port.'; return; }
   try {
-    await apiFetch(`/api/devices/${_devicePortsModalId}/device-ports`, {
+    await apiFetch('/api/port-link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label }),
+      body: JSON.stringify({
+        device_a_id: _devicePortsModalId,
+        device_b_id: targetDeviceId,
+        switch_port_b_id: targetPortId || null,
+      }),
     });
-    el('dp-iface-label').value = '';
-    await refreshDevicePortsModal();
-  } catch (e) {
-    el('dp-iface-error').textContent = e.message || 'Failed.';
-  }
-}
-
-async function removeDeviceInterface(dpId) {
-  try {
-    await apiFetch(`/api/devices/${_devicePortsModalId}/device-ports/${dpId}`, { method: 'DELETE' });
-    await Promise.all([loadAllPorts(), refreshDevicePortsModal()]);
-    applyFilter();
-    if (currentTab === 'topology') loadTopology();
-  } catch (e) { console.error('removeDeviceInterface:', e); }
-}
-
-async function loadDevicePortOptions() {
-  const switchId = el('dp-switch').value;
-  const portSel  = el('dp-port');
-  if (!switchId) { portSel.innerHTML = '<option value="">— select port —</option>'; return; }
-
-  const ports = await apiFetch(`/api/switches/${switchId}/ports`);
-  const dev = allDevices.find(d => d.id === _devicePortsModalId);
-  const assignedIds = new Set((dev?.switch_ports || []).map(p => p.id));
-
-  portSel.innerHTML = '<option value="">— select port —</option>' +
-    ports.map(p => {
-      if (assignedIds.has(p.id)) return '';
-      const label = (p.label || ('Port ' + p.port_number)) + ` (${p.port_type}·${p.speed})`;
-      const taken = p.device_id ? ' — in use' : '';
-      return `<option value="${p.id}">${esc(label)}${taken}</option>`;
-    }).join('');
-}
-
-async function connectDevicePort() {
-  const dpId   = el('dp-dev-port').value;
-  const portId = el('dp-port').value;
-  el('dp-error').textContent = '';
-  if (!dpId)   { el('dp-error').textContent = 'Select a device interface.'; return; }
-  if (!portId) { el('dp-error').textContent = 'Select a switch port.'; return; }
-  try {
-    await apiFetch(`/api/devices/${_devicePortsModalId}/port`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dev_port_id: parseInt(dpId), switch_port_id: parseInt(portId) }),
-    });
-    el('dp-switch').value = '';
-    el('dp-port').innerHTML = '<option value="">— select port —</option>';
+    el('dp-target-device').value = '';
+    el('dp-target-port').style.display = 'none';
     await Promise.all([loadAllPorts(), refreshDevicePortsModal()]);
     applyFilter();
     if (currentTab === 'topology') loadTopology();
   } catch (e) {
     el('dp-error').textContent = e.message || 'Failed to connect.';
   }
-}
-
-async function disconnectDevicePort(portId) {
-  try {
-    await apiFetch(`/api/devices/${_devicePortsModalId}/ports/${portId}`, { method: 'DELETE' });
-    await Promise.all([loadAllPorts(), refreshDevicePortsModal()]);
-    applyFilter();
-    if (currentTab === 'topology') loadTopology();
-  } catch (e) { console.error('disconnectDevicePort:', e); }
 }
 
 // ── name editing ─────────────────────────────────────────────────────────────
@@ -553,7 +506,7 @@ function startAutoRefresh() {
 let topoSimulation = null;
 
 async function loadTopologyTab() {
-  await Promise.all([loadSwitches(), loadSwitchLinks(), loadTopology()]);
+  await Promise.all([loadSwitches(), loadTopology()]);
 }
 
 // ── switch management ─────────────────────────────────────────────────────────
@@ -624,105 +577,99 @@ async function deleteSwitch(id) {
   if (!confirm('Remove this switch and all its ports?')) return;
   try {
     await apiFetch(`/api/switches/${id}`, { method: 'DELETE' });
-    await Promise.all([loadSwitches(), loadSwitchLinks(), loadAllPorts(), loadTopology()]);
+    await Promise.all([loadSwitches(), loadAllPorts(), loadTopology()]);
     applyFilter();
   } catch (e) { console.error('deleteSwitch:', e); }
 }
 
-// ── switch links ──────────────────────────────────────────────────────────────
+// ── port connect (from switch ports modal) ────────────────────────────────────
 
-async function loadSwitchLinks() {
+let _portConnectPortId = null;
+
+async function showPortConnect(portId, portLabel) {
+  _portConnectPortId = portId;
+  el('pc-port-label-val').textContent = portLabel;
+  el('pc-error').textContent = '';
+  el('pc-dev-port').style.display = 'none';
+  el('pc-dev-port').innerHTML = '<option value="">— select port —</option>';
+
+  const devices = await apiFetch('/api/devices');
+  el('pc-device').innerHTML = '<option value="">— select device —</option>' +
+    devices
+      .filter(d => d.id !== _portsModalSwitchId && !d.is_virtual)
+      .map(d => `<option value="${d.id}" data-is-switch="${d.is_switch}">${esc(d.name || d.ip_address || d.mac_address || 'Device ' + d.id)}</option>`)
+      .join('');
+
+  el('port-connect-section').style.display = '';
+}
+
+function closePortConnect() {
+  el('port-connect-section').style.display = 'none';
+  _portConnectPortId = null;
+}
+
+async function loadPCDevicePorts() {
+  const sel = el('pc-device');
+  const deviceId = sel.value;
+  const portSel = el('pc-dev-port');
+  if (!deviceId) { portSel.style.display = 'none'; return; }
+
+  const isSwitch = sel.options[sel.selectedIndex]?.getAttribute('data-is-switch') === 'true';
+  if (isSwitch) {
+    const ports = await apiFetch(`/api/switches/${deviceId}/ports`);
+    portSel.innerHTML = '<option value="">— select port —</option>' +
+      ports.filter(p => !p.link_id).map(p => {
+        const lbl = p.label || ('Port ' + p.port_number);
+        return `<option value="${p.id}">${esc(lbl)} (${p.port_type}·${p.speed})</option>`;
+      }).join('');
+    portSel.style.display = '';
+  } else {
+    portSel.style.display = 'none';
+  }
+}
+
+async function savePortConnect() {
+  const sel = el('pc-device');
+  const targetDeviceId = parseInt(sel.value);
+  const isSwitch = sel.options[sel.selectedIndex]?.getAttribute('data-is-switch') === 'true';
+  const targetPortId = isSwitch ? parseInt(el('pc-dev-port').value) || null : null;
+  el('pc-error').textContent = '';
+  if (!targetDeviceId) { el('pc-error').textContent = 'Select a device.'; return; }
+  if (isSwitch && !targetPortId) { el('pc-error').textContent = 'Select a port.'; return; }
   try {
-    const links = await apiFetch('/api/switch-links');
-    renderSwitchLinks(links);
-  } catch (e) { console.error('loadSwitchLinks:', e); }
-}
-
-function renderSwitchLinks(links) {
-  const list = el('links-list');
-  if (!links.length) {
-    list.innerHTML = '<p class="empty-sw">No switch links defined.</p>';
-    return;
-  }
-  list.innerHTML = links.map(lnk => {
-    const a = lnk.port_a;
-    const b = lnk.port_b;
-    const labelA = `${esc(a.switch_name)}: ${esc(a.label || ('Port ' + a.port_number))} (${esc(a.port_type)}·${esc(a.speed)})`;
-    const labelB = `${esc(b.switch_name)}: ${esc(b.label || ('Port ' + b.port_number))} (${esc(b.port_type)}·${esc(b.speed)})`;
-    return `<div class="switch-row">
-      <div class="link-info">
-        <span class="link-side">${labelA}</span>
-        <span class="link-arrow">↔</span>
-        <span class="link-side">${labelB}</span>
-      </div>
-      <button class="btn-delete" onclick="deleteSwitchLink(${lnk.id})" title="Remove link">✕</button>
-    </div>`;
-  }).join('');
-}
-
-async function showAddLinkForm() {
-  el('link-form-error').textContent = '';
-  // populate switch dropdowns
-  const switches = await apiFetch('/api/switches');
-  const opts = '<option value="">— select switch —</option>' +
-    switches.map(s => `<option value="${s.id}">${esc(s.name || s.ip_address)}</option>`).join('');
-  el('link-sw-a').innerHTML = opts;
-  el('link-sw-b').innerHTML = opts;
-  el('link-port-a').innerHTML = '<option value="">— select port —</option>';
-  el('link-port-b').innerHTML = '<option value="">— select port —</option>';
-  el('add-link-form').classList.remove('hidden');
-}
-
-function hideAddLinkForm() {
-  el('add-link-form').classList.add('hidden');
-}
-
-async function loadLinkPorts(side) {
-  const swSel   = el(`link-sw-${side}`);
-  const portSel = el(`link-port-${side}`);
-  const switchId = swSel.value;
-  if (!switchId) {
-    portSel.innerHTML = '<option value="">— select port —</option>';
-    return;
-  }
-  const ports = await apiFetch(`/api/switches/${switchId}/ports`);
-  portSel.innerHTML = '<option value="">— select port —</option>' +
-    ports.map(p => {
-      const lbl = p.label || ('Port ' + p.port_number);
-      return `<option value="${p.id}">${esc(lbl)} (${p.port_type} · ${p.speed})</option>`;
-    }).join('');
-}
-
-async function addSwitchLink() {
-  const portAId = el('link-port-a').value;
-  const portBId = el('link-port-b').value;
-  el('link-form-error').textContent = '';
-  if (!portAId || !portBId) {
-    el('link-form-error').textContent = 'Select a port on both sides.';
-    return;
-  }
-  if (portAId === portBId) {
-    el('link-form-error').textContent = 'Cannot link a port to itself.';
-    return;
-  }
-  try {
-    await apiFetch('/api/switch-links', {
+    await apiFetch('/api/port-link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ port_a_id: parseInt(portAId), port_b_id: parseInt(portBId) }),
+      body: JSON.stringify({
+        device_a_id: _portsModalSwitchId,
+        switch_port_a_id: _portConnectPortId,
+        device_b_id: targetDeviceId,
+        switch_port_b_id: targetPortId,
+      }),
     });
-    hideAddLinkForm();
-    await Promise.all([loadSwitchLinks(), loadTopology()]);
+    closePortConnect();
+    await Promise.all([loadAllPorts(), loadSwitches(), refreshPortsModal()]);
+    if (currentTab === 'topology') loadTopology();
+    applyFilter();
   } catch (e) {
-    el('link-form-error').textContent = e.message || 'Failed to save link.';
+    el('pc-error').textContent = e.message || 'Failed to connect.';
   }
 }
 
-async function deleteSwitchLink(id) {
+// ── unified disconnect ────────────────────────────────────────────────────────
+
+async function disconnectPort(linkId) {
   try {
-    await apiFetch(`/api/switch-links/${id}`, { method: 'DELETE' });
-    await Promise.all([loadSwitchLinks(), loadTopology()]);
-  } catch (e) { console.error('deleteSwitchLink:', e); }
+    await apiFetch(`/api/port-link/${linkId}`, { method: 'DELETE' });
+    const tasks = [loadAllPorts(), loadSwitches()];
+    if (!el('ports-modal').classList.contains('hidden') && _portsModalSwitchId)
+      tasks.push(refreshPortsModal());
+    if (!el('device-ports-modal').classList.contains('hidden') && _devicePortsModalId)
+      tasks.push(refreshDevicePortsModal());
+    await Promise.all(tasks);
+    applyFilter();
+    if (currentTab === 'topology') loadTopology();
+  } catch (e) { console.error('disconnectPort:', e); }
 }
 
 // ── ports modal ───────────────────────────────────────────────────────────────
@@ -769,7 +716,7 @@ async function refreshPortsModal() {
     empty.classList.remove('hidden');
   } else {
     empty.classList.add('hidden');
-    tbody.innerHTML = ports.map(p => renderPortRow(p, devices)).join('');
+    tbody.innerHTML = ports.map(p => renderPortRow(p)).join('');
   }
 
   // set default start port number for the add form
@@ -777,7 +724,7 @@ async function refreshPortsModal() {
   el('ap-count').value = 1;
 }
 
-function renderPortRow(port, devices) {
+function renderPortRow(port) {
   const typeOpts = ['RJ45', 'SFP+'].map(t =>
     `<option value="${t}" ${t === port.port_type ? 'selected' : ''}>${t}</option>`
   ).join('');
@@ -786,7 +733,10 @@ function renderPortRow(port, devices) {
     `<option value="${s}" ${s === port.speed ? 'selected' : ''}>${s}</option>`
   ).join('');
 
-  const devLabel = port.device_label ? esc(port.device_label) : '<span class="port-no-device">—</span>';
+  const portLabel = JSON.stringify(port.label || ('Port ' + port.port_number));
+  const devCell = port.link_id
+    ? `<span>${esc(port.device_label)}</span> <button class="btn-xs" onclick="disconnectPort(${port.link_id})" title="Disconnect">✕</button>`
+    : `<button class="btn-xs btn-ghost" onclick="showPortConnect(${port.id}, ${portLabel})">+ Connect</button>`;
 
   return `<tr data-port-id="${port.id}">
     <td class="port-num">${port.port_number}</td>
@@ -794,7 +744,7 @@ function renderPortRow(port, devices) {
       placeholder="label" onchange="savePortField(${port.id}, 'label', this.value)" /></td>
     <td><select class="port-select" onchange="savePortField(${port.id}, 'port_type', this.value)">${typeOpts}</select></td>
     <td><select class="port-select" onchange="savePortField(${port.id}, 'speed', this.value)">${speedOpts}</select></td>
-    <td class="port-device-cell">${devLabel}</td>
+    <td class="port-device-cell">${devCell}</td>
     <td><button class="btn-delete" onclick="deletePort(${port.id})" title="Delete port">✕</button></td>
   </tr>`;
 }
@@ -1080,9 +1030,14 @@ function closeNodeDetail() {
 let _edgeTip = null;
 
 function showEdgeTip(ev, d) {
-  const text = d.type === 'switch_link'
-    ? `${d.port_a} (${d.port_a_type}·${d.speed_a}) ↔ ${d.port_b} (${d.port_b_type}·${d.speed_b})`
-    : d.port ? `${d.port} · ${d.port_type} · ${d.speed}` : null;
+  let text = null;
+  if (d.type === 'switch_link') {
+    text = d.port_a && d.port_b
+      ? `${d.port_a} (${d.port_a_type}·${d.speed_a}) ↔ ${d.port_b} (${d.port_b_type}·${d.speed_b})`
+      : d.port ? `${d.port} · ${d.port_type} · ${d.speed}` : null;
+  } else if (d.port) {
+    text = `${d.port} · ${d.port_type} · ${d.speed}`;
+  }
   if (!text) return;
   if (!_edgeTip) {
     _edgeTip = document.createElement('div');

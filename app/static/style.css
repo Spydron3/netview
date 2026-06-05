@@ -557,7 +557,8 @@ tr:hover td { background: var(--surface2); }
 /* D3 edges */
 .topo-edge             { fill: none; stroke-width: 1.5; }
 .topo-edge-port        { stroke: var(--muted); stroke-width: 1.5; }
-.topo-edge-switch_link { stroke: var(--blue); stroke-width: 2; stroke-dasharray: 6 3; }
+.topo-edge-switch_link { stroke: var(--blue); stroke-width: 2.5; stroke-dasharray: 8 4; }
+.topo-edge-device_link { stroke: var(--green); stroke-width: 1.5; stroke-dasharray: 4 4; }
 
 /* legend */
 .topo-legend {
@@ -751,6 +752,23 @@ tr:hover td { background: var(--surface2); }
   font-size: 12px;
   border-radius: 6px;
 }
+.btn-xs {
+  padding: 2px 7px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.btn-xs:hover { opacity: 1; }
+.btn-xs.btn-ghost {
+  background: var(--surface2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.btn-xs.btn-ghost:hover { color: var(--text); }
 .btn-ghost {
   background: var(--surface2);
   color: var(--muted);

@@ -63,9 +63,10 @@ class PortLink(Base):
     __tablename__ = "port_links"
 
     id          = Column(Integer, primary_key=True, autoincrement=True)
-    port_a_id   = Column(Integer, ForeignKey("switch_ports.id",  ondelete="CASCADE"), nullable=False, unique=True)
-    dev_port_id = Column(Integer, ForeignKey("device_ports.id",  ondelete="CASCADE"), nullable=True,  unique=True)
-    port_b_id   = Column(Integer, ForeignKey("switch_ports.id",  ondelete="CASCADE"), nullable=True,  unique=True)
+    port_a_id     = Column(Integer, ForeignKey("switch_ports.id",  ondelete="CASCADE"), nullable=True,  unique=True)
+    dev_port_id   = Column(Integer, ForeignKey("device_ports.id",  ondelete="CASCADE"), nullable=True,  unique=True)
+    port_b_id     = Column(Integer, ForeignKey("switch_ports.id",  ondelete="CASCADE"), nullable=True,  unique=True)
+    dev_port_id_b = Column(Integer, ForeignKey("device_ports.id",  ondelete="CASCADE"), nullable=True,  unique=True)
 
 
 class TopologyPosition(Base):
