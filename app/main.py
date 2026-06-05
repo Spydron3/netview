@@ -1146,7 +1146,7 @@ def api_topology():
                     "hostname": dev.hostname, "vendor": dev.vendor,
                     "name": dev.name, "is_online": dev.is_online,
                     "is_wireless": True,
-                    "room": dev.room,
+                    "room": rooms.get(dev.room_id),
                 })
                 seen.add(nid)
 
