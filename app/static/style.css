@@ -541,13 +541,13 @@ tr:hover td { background: var(--surface2); }
 
 /* D3 nodes */
 .topo-node { cursor: pointer; }
-.topo-node rect, .topo-node circle { stroke-width: 1.5; }
+.topo-node rect, .topo-node .node-circle { stroke-width: 1.5; }
 
 .topo-node-switch rect          { fill: color-mix(in srgb, var(--blue) 18%, var(--surface)); stroke: var(--blue); }
 .topo-node-external_switch rect { fill: color-mix(in srgb, var(--purple) 18%, var(--surface)); stroke: var(--purple); }
-.topo-node-device circle                   { fill: color-mix(in srgb, var(--green) 22%, var(--surface)); stroke: var(--green); }
-.topo-node-device.topo-node-offline circle { fill: var(--surface2); stroke: var(--muted); stroke-dasharray: 4 2; }
-.topo-node-unknown_device circle           { fill: var(--surface2); stroke: var(--yellow); stroke-dasharray: 4 2; }
+.topo-node-device .node-circle                   { fill: color-mix(in srgb, var(--green) 22%, var(--surface)); stroke: var(--green); }
+.topo-node-device.topo-node-offline .node-circle { fill: var(--surface2); stroke: var(--muted); stroke-dasharray: 4 2; }
+.topo-node-unknown_device .node-circle           { fill: var(--surface2); stroke: var(--yellow); stroke-dasharray: 4 2; }
 
 .topo-node text {
   fill: var(--text);
@@ -557,8 +557,8 @@ tr:hover td { background: var(--surface2); }
   font-family: var(--font);
 }
 
-.topo-node:hover rect   { filter: brightness(1.3); }
-.topo-node:hover circle { filter: brightness(1.3); }
+.topo-node:hover rect        { filter: brightness(1.3); }
+.topo-node:hover .node-circle { filter: brightness(1.3); }
 
 /* D3 edges */
 .topo-edge             { fill: none; stroke-width: 1.5; }
