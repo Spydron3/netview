@@ -21,7 +21,7 @@ from scanner import get_network_range, scan_network
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_VERSION = 14
+APP_VERSION = 15
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
@@ -87,48 +87,52 @@ def _send_new_device_email(new_devices: list[dict]) -> None:
 
 
 def _send_ip_change_email(changes: list[dict]) -> None:
-    host     = get_setting("smtp_host", "")
-    port     = int(get_setting("smtp_port", "587") or 587)
-    user     = get_setting("smtp_user", "")
-    password = get_setting("smtp_password", "")
-    from_    = get_setting("smtp_from", "") or user or "netviewmyhome@localhost"
-    to_      = get_setting("smtp_to", "")
-    tls      = get_setting("smtp_tls", "true").lower() == "true"
+    try:
+        host     = get_setting("smtp_host", "")
+        port     = int(get_setting("smtp_port", "587") or 587)
+        user     = get_setting("smtp_user", "")
+        password = get_setting("smtp_password", "")
+        from_    = get_setting("smtp_from", "") or user or "netviewmyhome@localhost"
+        to_      = get_setting("smtp_to", "")
+        tls      = get_setting("smtp_tls", "true").lower() == "true"
 
-    if not host or not to_:
-        return
+        if not host or not to_:
+            logger.warning("IP change email skipped: smtp_host or smtp_to not configured")
+            return
 
-    n = len(changes)
-    subject = f"NetViewMyHome: {n} device IP change{'s' if n != 1 else ''} detected"
-    lines = [f"{n} device{'s' if n != 1 else ''} changed IP address:\n"]
-    for c in changes:
-        label = c.get("name") or c.get("mac_address") or "unknown"
-        lines.append(f"  Device:  {label}")
-        lines.append(f"  Old IP:  {c['old_ip'] or '—'}")
-        lines.append(f"  New IP:  {c['new_ip']}")
-        if c.get("mac_address"):
-            lines.append(f"  MAC:     {c['mac_address']}")
-        lines.append("")
+        n = len(changes)
+        subject = f"NetViewMyHome: {n} device IP change{'s' if n != 1 else ''} detected"
+        lines = [f"{n} device{'s' if n != 1 else ''} changed IP address:\n"]
+        for c in changes:
+            label = c.get("name") or c.get("mac_address") or "unknown"
+            lines.append(f"  Device:  {label}")
+            lines.append(f"  Old IP:  {c['old_ip'] or '—'}")
+            lines.append(f"  New IP:  {c['new_ip']}")
+            if c.get("mac_address"):
+                lines.append(f"  MAC:     {c['mac_address']}")
+            lines.append("")
 
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"]    = from_
-    msg["To"]      = to_
-    msg.set_content("\n".join(lines))
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"]    = from_
+        msg["To"]      = to_
+        msg.set_content("\n".join(lines))
 
-    if port == 465:
-        with smtplib.SMTP_SSL(host, port, timeout=10) as smtp:
-            if user and password:
-                smtp.login(user, password)
-            smtp.send_message(msg)
-    else:
-        with smtplib.SMTP(host, port, timeout=10) as smtp:
-            if tls:
-                smtp.starttls()
-            if user and password:
-                smtp.login(user, password)
-            smtp.send_message(msg)
-    logger.info("IP change notification sent to %s (%d change(s))", to_, n)
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=10) as smtp:
+                if user and password:
+                    smtp.login(user, password)
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=10) as smtp:
+                if tls:
+                    smtp.starttls()
+                if user and password:
+                    smtp.login(user, password)
+                smtp.send_message(msg)
+        logger.info("IP change notification sent to %s (%d change(s))", to_, n)
+    except Exception:
+        logger.exception("Failed to send IP change email")
 
 
 def _record_ip_history(db, device_id: int, ip_address: str, changed_at: datetime) -> None:
@@ -195,6 +199,10 @@ def _run_scan() -> None:
                     # Detect IP change
                     if existing.ip_address != ip:
                         old_ip = existing.ip_address
+                        logger.info(
+                            "IP change detected: device %s (MAC %s) %s → %s",
+                            existing.id, mac or existing.mac_address, old_ip, ip,
+                        )
                         # If another device holds the new IP, clear it first
                         conflict = db.execute(
                             sa.select(Device).where(Device.ip_address == ip, Device.id != existing.id)
@@ -889,14 +897,22 @@ def api_put_settings(body: SettingsUpdate):
 
 
 @app.post("/api/settings/test-email")
-def api_test_email():
+def api_test_email(type: str = "new_device"):
     try:
-        _send_new_device_email([{
-            "ip_address": "192.168.1.1",
-            "hostname": "test-device.local",
-            "mac_address": "aa:bb:cc:dd:ee:ff",
-            "vendor": "Test (NetViewMyHome configuration check)",
-        }])
+        if type == "ip_change":
+            _send_ip_change_email([{
+                "name": "test-device",
+                "mac_address": "aa:bb:cc:dd:ee:ff",
+                "old_ip": "192.168.1.10",
+                "new_ip": "192.168.1.20",
+            }])
+        else:
+            _send_new_device_email([{
+                "ip_address": "192.168.1.1",
+                "hostname": "test-device.local",
+                "mac_address": "aa:bb:cc:dd:ee:ff",
+                "vendor": "Test (NetViewMyHome configuration check)",
+            }])
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return {"status": "ok"}
