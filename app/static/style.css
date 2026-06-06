@@ -289,6 +289,27 @@ main {
   color: var(--muted);
 }
 
+.ip-history {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 2px 0;
+}
+.ip-history summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.ip-history summary::before { content: '▸ '; }
+.ip-history[open] summary::before { content: '▾ '; }
+.ip-history-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 1px 0 1px 10px;
+  font-family: ui-monospace, monospace;
+}
+.ip-history-date { opacity: 0.65; white-space: nowrap; }
+
 .ports {
   display: flex;
   flex-wrap: wrap;

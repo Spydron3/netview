@@ -15,13 +15,13 @@ from pydantic import BaseModel
 
 from database import get_db, get_setting, init_db, set_setting
 from sqlalchemy.orm import aliased as _aliased
-from models import Device, DevicePort, PortLink, Room, ScanRun, Setting, SwitchPort, TopologyPosition, Wlan
+from models import Device, DeviceIPHistory, DevicePort, PortLink, Room, ScanRun, Setting, SwitchPort, TopologyPosition, Wlan
 from scanner import get_network_range, scan_network
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_VERSION = 12
+APP_VERSION = 13
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
@@ -86,6 +86,63 @@ def _send_new_device_email(new_devices: list[dict]) -> None:
     logger.info("New device notification sent to %s (%d device(s))", to_, n)
 
 
+def _send_ip_change_email(changes: list[dict]) -> None:
+    host     = get_setting("smtp_host", "")
+    port     = int(get_setting("smtp_port", "587") or 587)
+    user     = get_setting("smtp_user", "")
+    password = get_setting("smtp_password", "")
+    from_    = get_setting("smtp_from", "") or user or "netviewmyhome@localhost"
+    to_      = get_setting("smtp_to", "")
+    tls      = get_setting("smtp_tls", "true").lower() == "true"
+
+    if not host or not to_:
+        return
+
+    n = len(changes)
+    subject = f"NetViewMyHome: {n} device IP change{'s' if n != 1 else ''} detected"
+    lines = [f"{n} device{'s' if n != 1 else ''} changed IP address:\n"]
+    for c in changes:
+        label = c.get("name") or c.get("mac_address") or "unknown"
+        lines.append(f"  Device:  {label}")
+        lines.append(f"  Old IP:  {c['old_ip'] or '—'}")
+        lines.append(f"  New IP:  {c['new_ip']}")
+        if c.get("mac_address"):
+            lines.append(f"  MAC:     {c['mac_address']}")
+        lines.append("")
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"]    = from_
+    msg["To"]      = to_
+    msg.set_content("\n".join(lines))
+
+    if port == 465:
+        with smtplib.SMTP_SSL(host, port, timeout=10) as smtp:
+            if user and password:
+                smtp.login(user, password)
+            smtp.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port, timeout=10) as smtp:
+            if tls:
+                smtp.starttls()
+            if user and password:
+                smtp.login(user, password)
+            smtp.send_message(msg)
+    logger.info("IP change notification sent to %s (%d change(s))", to_, n)
+
+
+def _record_ip_history(db, device_id: int, ip_address: str, changed_at: datetime) -> None:
+    db.add(DeviceIPHistory(device_id=device_id, ip_address=ip_address, changed_at=changed_at))
+    db.flush()
+    rows = db.execute(
+        sa.select(DeviceIPHistory)
+        .where(DeviceIPHistory.device_id == device_id)
+        .order_by(DeviceIPHistory.changed_at.desc())
+    ).scalars().all()
+    for old in rows[5:]:
+        db.delete(old)
+
+
 def _run_scan() -> None:
     if not _scan_lock.acquire(blocking=False):
         logger.info("Scan already running — skipping")
@@ -108,6 +165,7 @@ def _run_scan() -> None:
         now = datetime.utcnow()
 
         new_devices: list[dict] = []
+        ip_changes:  list[dict] = []
 
         with get_db() as db:
             db.execute(
@@ -116,36 +174,67 @@ def _run_scan() -> None:
             )
 
             for d in devices:
-                existing = db.execute(
-                    sa.select(Device).where(Device.ip_address == d["ip_address"])
-                ).scalar_one_or_none()
+                mac = d["mac_address"]
+                ip  = d["ip_address"]
+                existing = None
+
+                # MAC is the stable UID — look up by MAC first
+                if mac:
+                    existing = db.execute(
+                        sa.select(Device).where(Device.mac_address == mac)
+                    ).scalar_one_or_none()
+
+                # Fall back to IP lookup (handles devices without MAC)
+                if not existing:
+                    existing = db.execute(
+                        sa.select(Device).where(Device.ip_address == ip)
+                    ).scalar_one_or_none()
 
                 if existing:
+                    # Detect IP change
+                    if existing.ip_address != ip:
+                        old_ip = existing.ip_address
+                        # If another device holds the new IP, clear it first
+                        conflict = db.execute(
+                            sa.select(Device).where(Device.ip_address == ip, Device.id != existing.id)
+                        ).scalar_one_or_none()
+                        if conflict:
+                            conflict.ip_address = None
+                            db.flush()
+                        existing.ip_address = ip
+                        _record_ip_history(db, existing.id, ip, now)
+                        ip_changes.append({
+                            "name": existing.name or existing.hostname,
+                            "mac_address": mac or existing.mac_address,
+                            "old_ip": old_ip,
+                            "new_ip": ip,
+                        })
                     existing.is_online = True
                     existing.last_seen = now
                     existing.scan_count += 1
                     existing.open_ports = d["open_ports"]
-                    if d["mac_address"]:
-                        existing.mac_address = d["mac_address"]
+                    if mac:
+                        existing.mac_address = mac
                     if d["hostname"]:
                         existing.hostname = d["hostname"]
                     if d["vendor"]:
                         existing.vendor = d["vendor"]
                 else:
-                    db.add(
-                        Device(
-                            ip_address=d["ip_address"],
-                            mac_address=d["mac_address"],
-                            hostname=d["hostname"],
-                            vendor=d["vendor"],
-                            os_info=d["os_info"],
-                            is_online=True,
-                            open_ports=d["open_ports"],
-                            first_seen=now,
-                            last_seen=now,
-                            scan_count=1,
-                        )
+                    new_dev = Device(
+                        ip_address=ip,
+                        mac_address=mac,
+                        hostname=d["hostname"],
+                        vendor=d["vendor"],
+                        os_info=d["os_info"],
+                        is_online=True,
+                        open_ports=d["open_ports"],
+                        first_seen=now,
+                        last_seen=now,
+                        scan_count=1,
                     )
+                    db.add(new_dev)
+                    db.flush()
+                    _record_ip_history(db, new_dev.id, ip, now)
                     new_devices.append(d)
 
             online = len([d for d in devices if d["is_online"]])
@@ -167,6 +256,12 @@ def _run_scan() -> None:
             threading.Thread(
                 target=lambda: _send_new_device_email(new_devices),
                 daemon=True, name="email-notify",
+            ).start()
+
+        if ip_changes and get_setting("notify_ip_change", "false").lower() == "true":
+            threading.Thread(
+                target=lambda c=ip_changes: _send_ip_change_email(c),
+                daemon=True, name="email-ip-change",
             ).start()
 
     except Exception as exc:
@@ -254,6 +349,15 @@ def _device_wlans(db, device_id: int) -> list:
     ).scalars().all()
 
 
+def _device_ip_history(db, device_id: int) -> list:
+    return db.execute(
+        sa.select(DeviceIPHistory)
+        .where(DeviceIPHistory.device_id == device_id)
+        .order_by(DeviceIPHistory.changed_at.desc())
+        .limit(5)
+    ).scalars().all()
+
+
 def _device_ports(db, device_id: int) -> list:
     """Returns list of (SwitchPort, Device[switch], DevicePort) for the given device."""
     SwDev = _aliased(Device)
@@ -290,8 +394,16 @@ def api_devices():
         wlans_by_device: dict[int, list] = {}
         for w in wlan_rows:
             wlans_by_device.setdefault(w.device_id, []).append(w)
+        hist_rows = db.execute(
+            sa.select(DeviceIPHistory).order_by(DeviceIPHistory.device_id, DeviceIPHistory.changed_at.desc())
+        ).scalars().all()
+        hist_by_device: dict[int, list] = {}
+        for h in hist_rows:
+            bucket = hist_by_device.setdefault(h.device_id, [])
+            if len(bucket) < 5:
+                bucket.append(h)
         rooms = _rooms_dict(db)
-        return [_device_to_dict(dev, conns.get(dev.id, []), rooms, wlans_by_device.get(dev.id, [])) for dev in devices]
+        return [_device_to_dict(dev, conns.get(dev.id, []), rooms, wlans_by_device.get(dev.id, []), hist_by_device.get(dev.id, [])) for dev in devices]
 
 
 @app.get("/api/devices/{device_id}")
@@ -723,6 +835,7 @@ class SettingsUpdate(BaseModel):
     port_scan_enabled: bool | None = None
     network_range: str | None = None
     notify_new_device: bool | None = None
+    notify_ip_change:  bool | None = None
     smtp_host: str | None = None
     smtp_port: int | None = None
     smtp_user: str | None = None
@@ -755,6 +868,9 @@ def api_put_settings(body: SettingsUpdate):
 
     if body.notify_new_device is not None:
         set_setting("notify_new_device", "true" if body.notify_new_device else "false")
+
+    if body.notify_ip_change is not None:
+        set_setting("notify_ip_change", "true" if body.notify_ip_change else "false")
 
     str_fields = ("smtp_host", "smtp_user", "smtp_password", "smtp_from", "smtp_to")
     for field in str_fields:
@@ -1369,7 +1485,7 @@ def _rooms_dict(db) -> dict[int, str]:
     return {r.id: r.name for r in db.execute(sa.select(Room)).scalars().all()}
 
 
-def _device_to_dict(d: Device, ports: list | None = None, rooms: dict | None = None, wlans: list | None = None) -> dict:
+def _device_to_dict(d: Device, ports: list | None = None, rooms: dict | None = None, wlans: list | None = None, ip_history: list | None = None) -> dict:
     return {
         "id": d.id,
         "ip_address": d.ip_address,
@@ -1407,6 +1523,10 @@ def _device_to_dict(d: Device, ports: list | None = None, rooms: dict | None = N
             for p, sw, dp in (ports or [])
         ],
         "wlans": [{"id": w.id, "ssid": w.ssid, "band": w.band} for w in (wlans or [])],
+        "ip_history": [
+            {"ip_address": h.ip_address, "changed_at": h.changed_at.isoformat()}
+            for h in (ip_history or [])
+        ],
     }
 
 

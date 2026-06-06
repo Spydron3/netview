@@ -94,6 +94,15 @@ class Wlan(Base):
     band      = Column(String(5), nullable=False)  # "2.4" | "5" | "6"
 
 
+class DeviceIPHistory(Base):
+    __tablename__ = "device_ip_history"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    device_id  = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
+    ip_address = Column(String(45), nullable=False)
+    changed_at = Column(DateTime, nullable=False)
+
+
 class ScanRun(Base):
     __tablename__ = "scan_runs"
 

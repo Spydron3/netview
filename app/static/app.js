@@ -41,6 +41,7 @@ async function openSettings() {
     el('s-network').value       = s.network_range || '';
     el('s-port-scan').checked   = (s.port_scan_enabled || 'true') === 'true';
     el('s-notify-new').checked  = s.notify_new_device === 'true';
+    el('s-notify-ip').checked   = s.notify_ip_change  === 'true';
     el('s-smtp-host').value     = s.smtp_host || '';
     el('s-smtp-port').value     = s.smtp_port || '587';
     el('s-smtp-tls').checked    = (s.smtp_tls ?? 'true') === 'true';
@@ -58,7 +59,7 @@ async function openSettings() {
 }
 
 function toggleSmtpFields() {
-  el('smtp-fields').style.display = el('s-notify-new').checked ? 'block' : 'none';
+  el('smtp-fields').style.display = (el('s-notify-new').checked || el('s-notify-ip').checked) ? 'block' : 'none';
 }
 
 function closeSettings() {
@@ -80,6 +81,7 @@ async function saveSettings() {
         port_scan_enabled:  el('s-port-scan').checked,
         network_range:      el('s-network').value.trim(),
         notify_new_device:  el('s-notify-new').checked,
+        notify_ip_change:   el('s-notify-ip').checked,
         smtp_host:          el('s-smtp-host').value.trim(),
         smtp_port:          parseInt(el('s-smtp-port').value) || 587,
         smtp_tls:           el('s-smtp-tls').checked,
@@ -232,6 +234,16 @@ function renderDevices(devices) {
       ${d.hostname ? `<div class="device-hostname">${esc(d.hostname)}</div>` : ''}
       ${d.vendor   ? `<div class="device-vendor">${esc(d.vendor)}</div>` : ''}
       ${d.mac_address ? `<div class="device-mac">${esc(d.mac_address)}</div>` : ''}
+      ${(() => {
+        const prev = (d.ip_history || []).filter(h => h.ip_address !== d.ip_address);
+        return prev.length ? `<details class="ip-history">
+          <summary>IP history (${prev.length} previous)</summary>
+          ${prev.map(h => `<div class="ip-history-row">
+            <span>${esc(h.ip_address)}</span>
+            <span class="ip-history-date">${new Date(h.changed_at + 'Z').toLocaleString()}</span>
+          </div>`).join('')}
+        </details>` : '';
+      })()}
       ${ports.length ? `
         <div class="ports">
           ${ports.map(p => d.ip_address
