@@ -1132,7 +1132,7 @@ function renderTopology(data) {
 
   // Regular device nodes (no virtual children)
   node.filter(d => d.type === 'device' && !(d.virtual_children || []).length)
-    .append('circle').attr('r', 20);
+    .append('circle').attr('class', 'node-circle').attr('r', 20);
 
   // WLAN arcs: three ~90° arcs concentric around source (0,6), sweep=1 bows upward.
   // Endpoints computed at ±45° from vertical for each radius (4, 8, 12).

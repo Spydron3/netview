@@ -1062,12 +1062,12 @@ tr:hover td { background: var(--surface2); }
 .nd-port-row.nd-port-empty .nd-port-dev { color: var(--muted); }
 
 /* ── wireless topology node ─────────────────────────────────────────────────── */
-.topo-node-wireless circle {
+.topo-node-wireless .node-circle {
   stroke: var(--cyan, #22d3ee);
   stroke-width: 2;
   stroke-dasharray: 5 3;
 }
-.topo-node-wireless.topo-node-offline circle {
+.topo-node-wireless.topo-node-offline .node-circle {
   stroke: var(--muted);
 }
 .wifi-arc {
