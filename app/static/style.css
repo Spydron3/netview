@@ -321,6 +321,10 @@ main {
   margin-top: auto;
   font-size: 11px;
   color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .device-delete-btn {
   background: none;
@@ -331,8 +335,7 @@ main {
   cursor: pointer;
   opacity: 0.5;
   transition: opacity 0.15s;
-  display: block;
-  margin-top: 4px;
+  flex-shrink: 0;
 }
 .device-delete-btn:hover { opacity: 1; }
 
@@ -1073,6 +1076,22 @@ tr:hover td { background: var(--surface2); }
   stroke-width: 1.5;
   stroke-linecap: round;
   opacity: 0.8;
+}
+
+/* ── access point topology node ─────────────────────────────────────────────── */
+.topo-node-ap circle {
+  stroke: var(--yellow);
+  stroke-width: 2;
+}
+.topo-node-ap.topo-node-offline circle {
+  stroke: var(--muted);
+}
+.ap-arc {
+  fill: none;
+  stroke: var(--yellow);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.85;
 }
 
 /* ── device interface list (device ports modal) ─────────────────────────────── */

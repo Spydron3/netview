@@ -278,7 +278,6 @@ function renderDevices(devices) {
         ${(d.wlans || []).length > 0 ? `${d.wlans.length} WLAN${d.wlans.length !== 1 ? 's' : ''}` : 'Manage WLANs'}
       </button>
       ` : ''}
-      <button class="device-delete-btn" onclick="deleteDevice(${d.id})">Delete device</button>
       <div class="device-room-row">
         <select class="room-select" onchange="onRoomSelect(${d.id}, this)">
           <option value="">— no room —</option>
@@ -291,10 +290,8 @@ function renderDevices(devices) {
           onblur="cancelNewRoom(this)" />
       </div>
       <div class="device-footer">
-        ${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_access_point ? `<span class="device-ap-badge">AP</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
-        ${d.is_online
-          ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}`
-          : `Offline · last seen ${timeAgo(new Date(d.last_seen + 'Z'))}`}
+        <span>${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_access_point ? `<span class="device-ap-badge">AP</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}${d.is_online ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}` : `Offline · last seen ${timeAgo(new Date(d.last_seen + 'Z'))}`}</span>
+        <button class="device-delete-btn" onclick="deleteDevice(${d.id})">Delete</button>
       </div>
     </div>`;
   }).join('');
@@ -563,13 +560,18 @@ async function addWlan() {
   el('wlan-error').textContent = '';
   if (!ssid) { el('wlan-error').textContent = 'SSID must not be empty.'; return; }
   try {
-    await apiFetch(`/api/devices/${_wlanModalDeviceId}/wlans`, {
+    const w = await apiFetch(`/api/devices/${_wlanModalDeviceId}/wlans`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ssid, band }),
     });
     el('wlan-new-ssid').value = '';
-    await Promise.all([refreshWlanModal(), loadDevices()]);
+    const idx = allDevices.findIndex(d => d.id === _wlanModalDeviceId);
+    if (idx >= 0) {
+      allDevices[idx] = { ...allDevices[idx], wlans: [...(allDevices[idx].wlans || []), w] };
+      applyFilter();
+    }
+    await refreshWlanModal();
   } catch (e) {
     el('wlan-error').textContent = e.message || 'Failed to add WLAN.';
   }
@@ -577,7 +579,12 @@ async function addWlan() {
 
 async function deleteWlan(wlanId) {
   await apiFetch(`/api/devices/${_wlanModalDeviceId}/wlans/${wlanId}`, { method: 'DELETE' });
-  await Promise.all([refreshWlanModal(), loadDevices()]);
+  const idx = allDevices.findIndex(d => d.id === _wlanModalDeviceId);
+  if (idx >= 0) {
+    allDevices[idx] = { ...allDevices[idx], wlans: (allDevices[idx].wlans || []).filter(w => w.id !== wlanId) };
+    applyFilter();
+  }
+  await refreshWlanModal();
 }
 
 // ── name editing ─────────────────────────────────────────────────────────────
@@ -1107,6 +1114,7 @@ function renderTopology(data) {
       if (d.type === 'device' && d.is_online === false) cls += ' topo-node-offline';
       if (d.type === 'device' && (d.virtual_children || []).length > 0) cls += ' topo-node-vmhost';
       if (d.type === 'device' && d.is_wireless) cls += ' topo-node-wireless';
+      if (d.type === 'device' && d.is_access_point) cls += ' topo-node-ap';
       return cls;
     })
     .call(d3.drag()
@@ -1127,10 +1135,16 @@ function renderTopology(data) {
   node.filter(d => d.type === 'device' && !(d.virtual_children || []).length)
     .append('circle').attr('r', 20);
 
-  // WiFi arc on wireless nodes
-  node.filter(d => d.type === 'device' && d.is_wireless && !(d.virtual_children || []).length)
+  // WiFi arc on wireless non-AP nodes
+  node.filter(d => d.type === 'device' && d.is_wireless && !d.is_access_point && !(d.virtual_children || []).length)
     .append('path')
     .attr('class', 'wifi-arc')
+    .attr('d', 'M-9,-16 A15,15 0 0,1 9,-16 M-5,-20 A10,10 0 0,1 5,-20 M-1,-24 A5,5 0 0,1 1,-24');
+
+  // AP broadcast arcs on access point nodes
+  node.filter(d => d.type === 'device' && d.is_access_point && !(d.virtual_children || []).length)
+    .append('path')
+    .attr('class', 'ap-arc')
     .attr('d', 'M-9,-16 A15,15 0 0,1 9,-16 M-5,-20 A10,10 0 0,1 5,-20 M-1,-24 A5,5 0 0,1 1,-24');
 
   // VM host nodes: rounded rect with a vertical list of child VMs

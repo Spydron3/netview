@@ -21,7 +21,7 @@ from scanner import get_network_range, scan_network
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_VERSION = 2
+APP_VERSION = 3
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
@@ -1169,6 +1169,7 @@ def api_topology():
                         "hostname": dev.hostname, "vendor": dev.vendor,
                         "name": dev.name, "is_online": True if (dev.is_switch and not dev.ip_address) else dev.is_online,
                         "is_wireless": dev.is_wireless,
+                        "is_access_point": dev.is_access_point,
                         "room": rooms.get(dev.room_id),
                     })
                     seen.add(tgt)
