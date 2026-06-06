@@ -21,7 +21,7 @@ from scanner import get_network_range, scan_network
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_VERSION = 5
+APP_VERSION = 6
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
@@ -1251,7 +1251,7 @@ def api_topology():
         ).scalars().all()
         for dev in wireless_devs:
             nid = f"dev_{dev.id}"
-            if nid not in seen:
+            if nid not in seen and f"sw_{dev.id}" not in seen:
                 nodes.append({
                     "id": nid, "type": "device",
                     "label": _dev_label(dev),

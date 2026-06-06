@@ -1134,11 +1134,15 @@ function renderTopology(data) {
   node.filter(d => d.type === 'device' && !(d.virtual_children || []).length)
     .append('circle').attr('r', 20);
 
-  // WiFi arc on wireless/AP nodes — sweep=1 (CW in SVG y-down) bows arcs upward (toward negative y)
-  node.filter(d => d.type === 'device' && (d.is_wireless || d.is_access_point) && !(d.virtual_children || []).length)
-    .append('path')
+  // WiFi icon on wireless/AP nodes: three concentric semicircles centered at (0,4) with sweep=0
+  // (CCW from left to right bows upward in SVG y-down coords), plus a dot at base
+  const wifiNodes = node.filter(d => d.type === 'device' && (d.is_wireless || d.is_access_point) && !(d.virtual_children || []).length);
+  wifiNodes.append('path')
     .attr('class', 'wifi-arc')
-    .attr('d', 'M-8,3 A11,11 0 0,1 8,3 M-5,-3 A7,7 0 0,1 5,-3 M-2,-9 A3,3 0 0,1 2,-9');
+    .attr('d', 'M-9,4 A9,9 0 0,0 9,4 M-6,4 A6,6 0 0,0 6,4 M-3,4 A3,3 0 0,0 3,4');
+  wifiNodes.append('circle')
+    .attr('class', 'wifi-dot')
+    .attr('cx', 0).attr('cy', 6).attr('r', 2);
 
   // VM host nodes: rounded rect with a vertical list of child VMs
   node.filter(d => d.type === 'device' && (d.virtual_children || []).length > 0)
