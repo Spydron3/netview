@@ -1113,7 +1113,7 @@ function renderTopology(data) {
       let cls = `topo-node topo-node-${d.type}`;
       if (d.type === 'device' && d.is_online === false) cls += ' topo-node-offline';
       if (d.type === 'device' && (d.virtual_children || []).length > 0) cls += ' topo-node-vmhost';
-      if (d.type === 'device' && (d.is_wireless || d.is_access_point)) cls += ' topo-node-wireless';
+      if ((d.type === 'device' && (d.is_wireless || d.is_access_point)) || (d.type === 'switch' && d.is_access_point)) cls += ' topo-node-wireless';
       return cls;
     })
     .call(d3.drag()
@@ -1134,12 +1134,15 @@ function renderTopology(data) {
   node.filter(d => d.type === 'device' && !(d.virtual_children || []).length)
     .append('circle').attr('r', 20);
 
-  // WiFi icon on wireless/AP nodes: three concentric semicircles centered at (0,4) with sweep=0
-  // (CCW from left to right bows upward in SVG y-down coords), plus a dot at base
-  const wifiNodes = node.filter(d => d.type === 'device' && (d.is_wireless || d.is_access_point) && !(d.virtual_children || []).length);
+  // WiFi icon: concentric semicircles, all anchored at y=4 (source/dot).
+  // sweep=1 (CW in SVG y-down) passes through the TOP of each circle → bows upward.
+  const wifiNodes = node.filter(d =>
+    (d.type === 'device' && (d.is_wireless || d.is_access_point) && !(d.virtual_children || []).length) ||
+    (d.type === 'switch' && d.is_access_point)
+  );
   wifiNodes.append('path')
     .attr('class', 'wifi-arc')
-    .attr('d', 'M-9,4 A9,9 0 0,0 9,4 M-6,4 A6,6 0 0,0 6,4 M-3,4 A3,3 0 0,0 3,4');
+    .attr('d', 'M-9,4 A9,9 0 0,1 9,4 M-6,4 A6,6 0 0,1 6,4 M-3,4 A3,3 0 0,1 3,4');
   wifiNodes.append('circle')
     .attr('class', 'wifi-dot')
     .attr('cx', 0).attr('cy', 6).attr('r', 2);
