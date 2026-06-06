@@ -271,6 +271,7 @@ function renderDevices(devices) {
         ${(d.wlans || []).length > 0 ? `${d.wlans.length} WLAN${d.wlans.length !== 1 ? 's' : ''}` : 'Manage WLANs'}
       </button>
       ` : ''}
+      <button class="device-delete-btn" onclick="deleteDevice(${d.id})">Delete device</button>
       <div class="device-room-row">
         <select class="room-select" onchange="onRoomSelect(${d.id}, this)">
           <option value="">— no room —</option>
@@ -283,13 +284,10 @@ function renderDevices(devices) {
           onblur="cancelNewRoom(this)" />
       </div>
       <div class="device-footer">
-        <span class="device-footer-status">
-          ${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_access_point ? `<span class="device-ap-badge">AP</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
-          ${d.is_online
-            ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}`
-            : `Offline · last seen ${timeAgo(new Date(d.last_seen + 'Z'))}`}
-        </span>
-        <button class="btn btn-sm btn-ghost btn-danger device-delete-btn" onclick="deleteDevice(${d.id})" title="Delete device">Delete</button>
+        ${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_access_point ? `<span class="device-ap-badge">AP</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
+        ${d.is_online
+          ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}`
+          : `Offline · last seen ${timeAgo(new Date(d.last_seen + 'Z'))}`}
       </div>
     </div>`;
   }).join('');
