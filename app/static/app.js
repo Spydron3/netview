@@ -1113,8 +1113,7 @@ function renderTopology(data) {
       let cls = `topo-node topo-node-${d.type}`;
       if (d.type === 'device' && d.is_online === false) cls += ' topo-node-offline';
       if (d.type === 'device' && (d.virtual_children || []).length > 0) cls += ' topo-node-vmhost';
-      if (d.type === 'device' && d.is_wireless) cls += ' topo-node-wireless';
-      if (d.type === 'device' && d.is_access_point) cls += ' topo-node-ap';
+      if (d.type === 'device' && (d.is_wireless || d.is_access_point)) cls += ' topo-node-wireless';
       return cls;
     })
     .call(d3.drag()
@@ -1135,17 +1134,11 @@ function renderTopology(data) {
   node.filter(d => d.type === 'device' && !(d.virtual_children || []).length)
     .append('circle').attr('r', 20);
 
-  // WiFi arc on wireless non-AP nodes
-  node.filter(d => d.type === 'device' && d.is_wireless && !d.is_access_point && !(d.virtual_children || []).length)
+  // WiFi arc on wireless/AP nodes — sweep=0 (CCW) so arcs bow upward away from center
+  node.filter(d => d.type === 'device' && (d.is_wireless || d.is_access_point) && !(d.virtual_children || []).length)
     .append('path')
     .attr('class', 'wifi-arc')
-    .attr('d', 'M-9,-16 A15,15 0 0,1 9,-16 M-5,-20 A10,10 0 0,1 5,-20 M-1,-24 A5,5 0 0,1 1,-24');
-
-  // AP broadcast arcs on access point nodes
-  node.filter(d => d.type === 'device' && d.is_access_point && !(d.virtual_children || []).length)
-    .append('path')
-    .attr('class', 'ap-arc')
-    .attr('d', 'M-9,-16 A15,15 0 0,1 9,-16 M-5,-20 A10,10 0 0,1 5,-20 M-1,-24 A5,5 0 0,1 1,-24');
+    .attr('d', 'M-8,3 A11,11 0 0,0 8,3 M-5,-3 A7,7 0 0,0 5,-3 M-2,-9 A3,3 0 0,0 2,-9');
 
   // VM host nodes: rounded rect with a vertical list of child VMs
   node.filter(d => d.type === 'device' && (d.virtual_children || []).length > 0)
