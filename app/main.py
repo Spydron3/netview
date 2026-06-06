@@ -21,7 +21,7 @@ from scanner import get_network_range, scan_network
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_VERSION = 13
+APP_VERSION = 14
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
@@ -178,10 +178,11 @@ def _run_scan() -> None:
                 ip  = d["ip_address"]
                 existing = None
 
-                # MAC is the stable UID — look up by MAC first
+                # MAC is the stable UID — look up by MAC first (limit(1) guards against
+                # rare duplicate MACs in DB since the column has no unique constraint)
                 if mac:
                     existing = db.execute(
-                        sa.select(Device).where(Device.mac_address == mac)
+                        sa.select(Device).where(Device.mac_address == mac).limit(1)
                     ).scalar_one_or_none()
 
                 # Fall back to IP lookup (handles devices without MAC)
