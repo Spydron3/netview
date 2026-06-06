@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NetViewMyHome</title>
   <link rel="icon" type="image/svg+xml" href="/static/logo-icon.svg" />
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=2" />
 </head>
 <body>
 
@@ -16,6 +16,7 @@
       <span>NetViewMyHome</span>
     </div>
     <div class="header-right">
+      <span id="version-badge" class="version-badge"></span>
       <span id="network-badge" class="badge">detecting…</span>
       <button class="btn btn-icon" onclick="openSettings()" title="Settings">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -412,6 +413,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=2"></script>
 </body>
 </html>

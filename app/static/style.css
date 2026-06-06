@@ -80,6 +80,11 @@ header {
   object-position: 50% 46%;  /* center on the radar circle, exclude bottom text */
 }
 .header-right { display: flex; align-items: center; gap: 12px; }
+.version-badge {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
 
 .badge {
   background: var(--surface2);

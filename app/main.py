@@ -21,6 +21,8 @@ from scanner import get_network_range, scan_network
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+APP_VERSION = 2
+
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
 _scheduler  = BackgroundScheduler(daemon=True)
@@ -1312,6 +1314,11 @@ def api_delete_topo_position(node_id: str):
         row = db.get(TopologyPosition, node_id)
         if row:
             db.delete(row)
+
+
+@app.get("/api/version")
+def api_version():
+    return {"version": APP_VERSION}
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

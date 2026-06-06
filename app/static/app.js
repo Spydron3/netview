@@ -11,10 +11,17 @@ let currentTab = 'devices';
 (async function init() {
   const savedOffline = localStorage.getItem('showOffline');
   if (savedOffline !== null) el('show-offline').checked = savedOffline === 'true';
-  await Promise.all([loadRooms(), loadStats(), loadHistory(), loadAllPorts()]);
+  await Promise.all([loadRooms(), loadStats(), loadHistory(), loadAllPorts(), loadVersion()]);
   await loadDevices();
   startAutoRefresh();
 })();
+
+async function loadVersion() {
+  try {
+    const data = await apiFetch('/api/version');
+    el('version-badge').textContent = 'v' + data.version;
+  } catch (_) {}
+}
 
 // ── tab switching ─────────────────────────────────────────────────────────────
 
