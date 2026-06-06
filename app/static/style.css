@@ -1077,6 +1077,11 @@ tr:hover td { background: var(--surface2); }
   stroke-linecap: round;
   opacity: 0.8;
 }
+.wifi-dot {
+  fill: var(--cyan, #22d3ee);
+  stroke: none;
+  opacity: 0.8;
+}
 /* ── device interface list (device ports modal) ─────────────────────────────── */
 .dp-ifaces-list { padding: 4px 16px 8px; }
 .dp-iface-row {

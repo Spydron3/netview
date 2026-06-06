@@ -1143,6 +1143,9 @@ function renderTopology(data) {
   wifiNodes.append('path')
     .attr('class', 'wifi-arc')
     .attr('d', 'M-8.5,-2.5 A12,12 0 0,1 8.5,-2.5 M-5.7,0.3 A8,8 0 0,1 5.7,0.3 M-2.8,3.2 A4,4 0 0,1 2.8,3.2');
+  wifiNodes.append('circle')
+    .attr('class', 'wifi-dot')
+    .attr('cx', 0).attr('cy', 7).attr('r', 2);
 
   // VM host nodes: rounded rect with a vertical list of child VMs
   node.filter(d => d.type === 'device' && (d.virtual_children || []).length > 0)
