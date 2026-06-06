@@ -271,7 +271,7 @@ def api_devices():
         from sqlalchemy.dialects.postgresql import INET
         devices = db.execute(
             sa.select(Device)
-            .order_by(Device.is_online.desc(), sa.nullslast(sa.cast(Device.ip_address, INET)))
+            .order_by(sa.nullslast(sa.cast(Device.ip_address, INET)))
         ).scalars().all()
         # fetch all connections in one query and group by device
         SwDev = _aliased(Device)

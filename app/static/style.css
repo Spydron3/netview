@@ -323,14 +323,19 @@ main {
 }
 .device-footer-status { flex: 1; }
 .device-delete-btn {
-  opacity: 0;
-  transition: opacity 0.15s;
-  color: var(--red, #f87171) !important;
+  color: var(--muted) !important;
   border-color: transparent !important;
+  background: transparent !important;
   padding: 1px 6px;
   font-size: 11px;
+  transition: color 0.15s;
 }
-.device-card:hover .device-delete-btn { opacity: 1; }
+.device-delete-btn:hover {
+  color: var(--red, #f87171) !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  opacity: 1 !important;
+}
 
 /* ── history panel ── */
 .history-panel {
