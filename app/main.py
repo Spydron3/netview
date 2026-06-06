@@ -43,7 +43,7 @@ def _send_new_device_email(new_devices: list[dict]) -> None:
     port     = int(get_setting("smtp_port", "587") or 587)
     user     = get_setting("smtp_user", "")
     password = get_setting("smtp_password", "")
-    from_    = get_setting("smtp_from", "") or user or "netview@localhost"
+    from_    = get_setting("smtp_from", "") or user or "netviewmyhome@localhost"
     to_      = get_setting("smtp_to", "")
     tls      = get_setting("smtp_tls", "true").lower() == "true"
 
@@ -51,7 +51,7 @@ def _send_new_device_email(new_devices: list[dict]) -> None:
         raise ValueError("smtp_host and smtp_to must be configured")
 
     n = len(new_devices)
-    subject = f"Netview: {n} new device{'s' if n != 1 else ''} discovered"
+    subject = f"NetViewMyHome: {n} new device{'s' if n != 1 else ''} discovered"
     lines = [f"{n} new device{'s' if n != 1 else ''} discovered on your network:\n"]
     for d in new_devices:
         lines.append(f"  IP:       {d.get('ip_address', '—')}")
@@ -203,7 +203,7 @@ async def lifespan(app: FastAPI):
     _scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="Netview", lifespan=lifespan)
+app = FastAPI(title="NetViewMyHome", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -684,7 +684,7 @@ def api_test_email():
             "ip_address": "192.168.1.1",
             "hostname": "test-device.local",
             "mac_address": "aa:bb:cc:dd:ee:ff",
-            "vendor": "Test (Netview configuration check)",
+            "vendor": "Test (NetViewMyHome configuration check)",
         }])
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

@@ -28,4 +28,4 @@ jobs:
         with:
           context: ./app
           push: true
-          tags: ghcr.io/spydron3/netview:latest
+          tags: ghcr.io/spydron3/netviewmyhome:latest
