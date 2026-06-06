@@ -316,7 +316,21 @@ main {
   margin-top: auto;
   font-size: 11px;
   color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
+.device-footer-status { flex: 1; }
+.device-delete-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+  color: var(--red, #f87171) !important;
+  border-color: transparent !important;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+.device-card:hover .device-delete-btn { opacity: 1; }
 
 /* ── history panel ── */
 .history-panel {

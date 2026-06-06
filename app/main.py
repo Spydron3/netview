@@ -301,6 +301,15 @@ def api_device(device_id: int):
         return _device_to_dict(dev, _device_ports(db, device_id), _rooms_dict(db), _device_wlans(db, device_id))
 
 
+@app.delete("/api/devices/{device_id}", status_code=204)
+def api_delete_device(device_id: int):
+    with get_db() as db:
+        dev = db.get(Device, device_id)
+        if not dev:
+            raise HTTPException(status_code=404, detail="Device not found")
+        db.delete(dev)
+
+
 class DeviceUpdate(BaseModel):
     name: str | None = None
     is_switch: bool | None = None

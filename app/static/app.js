@@ -283,10 +283,13 @@ function renderDevices(devices) {
           onblur="cancelNewRoom(this)" />
       </div>
       <div class="device-footer">
-        ${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_access_point ? `<span class="device-ap-badge">AP</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
-        ${d.is_online
-          ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}`
-          : `Offline · last seen ${timeAgo(new Date(d.last_seen + 'Z'))}`}
+        <span class="device-footer-status">
+          ${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_access_point ? `<span class="device-ap-badge">AP</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
+          ${d.is_online
+            ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}`
+            : `Offline · last seen ${timeAgo(new Date(d.last_seen + 'Z'))}`}
+        </span>
+        <button class="btn btn-sm btn-ghost btn-danger device-delete-btn" onclick="deleteDevice(${d.id})" title="Delete device">Delete</button>
       </div>
     </div>`;
   }).join('');
@@ -320,6 +323,15 @@ async function toggleSwitch(deviceId, isSwitch) {
   });
   await loadDevices();
   if (currentTab === 'topology') await loadTopologyTab();
+}
+
+async function deleteDevice(deviceId) {
+  const dev = allDevices.find(d => d.id === deviceId);
+  const label = dev ? (dev.name || dev.ip_address || dev.mac_address || 'Device ' + deviceId) : 'Device ' + deviceId;
+  if (!confirm(`Delete "${label}"? This cannot be undone.`)) return;
+  await apiFetch(`/api/devices/${deviceId}`, { method: 'DELETE' });
+  await loadDevices();
+  if (currentTab === 'topology') loadTopology();
 }
 
 async function toggleAccessPoint(deviceId, isAP) {
