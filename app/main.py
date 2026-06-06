@@ -21,7 +21,7 @@ from scanner import get_network_range, scan_network
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_VERSION = 4
+APP_VERSION = 5
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
@@ -1234,15 +1234,19 @@ def api_topology():
                         "hostname": _d.hostname, "vendor": _d.vendor,
                         "name": _d.name, "is_online": True if (_d.is_switch and not _d.ip_address) else _d.is_online,
                         "is_wireless": _d.is_wireless,
+                        "is_access_point": _d.is_access_point,
                         "room": rooms.get(_d.room_id),
                     })
                     seen.add(_nid)
             edges.append({"source": src, "target": tgt, "type": "device_link"})
 
-        # Always include wireless devices even without a switch port connection
+        # Always include wireless and AP devices even without a switch port connection
         wireless_devs = db.execute(
             sa.select(Device).where(
-                sa.and_(Device.is_wireless == True, Device.is_virtual == False)  # noqa: E712
+                sa.and_(
+                    sa.or_(Device.is_wireless == True, Device.is_access_point == True),  # noqa: E712
+                    Device.is_virtual == False,  # noqa: E712
+                )
             )
         ).scalars().all()
         for dev in wireless_devs:
@@ -1254,7 +1258,8 @@ def api_topology():
                     "ip": dev.ip_address, "mac": dev.mac_address,
                     "hostname": dev.hostname, "vendor": dev.vendor,
                     "name": dev.name, "is_online": True if (dev.is_switch and not dev.ip_address) else dev.is_online,
-                    "is_wireless": True,
+                    "is_wireless": dev.is_wireless,
+                    "is_access_point": dev.is_access_point,
                     "room": rooms.get(dev.room_id),
                 })
                 seen.add(nid)

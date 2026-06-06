@@ -1134,11 +1134,11 @@ function renderTopology(data) {
   node.filter(d => d.type === 'device' && !(d.virtual_children || []).length)
     .append('circle').attr('r', 20);
 
-  // WiFi arc on wireless/AP nodes — sweep=0 (CCW) so arcs bow upward away from center
+  // WiFi arc on wireless/AP nodes — sweep=1 (CW in SVG y-down) bows arcs upward (toward negative y)
   node.filter(d => d.type === 'device' && (d.is_wireless || d.is_access_point) && !(d.virtual_children || []).length)
     .append('path')
     .attr('class', 'wifi-arc')
-    .attr('d', 'M-8,3 A11,11 0 0,0 8,3 M-5,-3 A7,7 0 0,0 5,-3 M-2,-9 A3,3 0 0,0 2,-9');
+    .attr('d', 'M-8,3 A11,11 0 0,1 8,3 M-5,-3 A7,7 0 0,1 5,-3 M-2,-9 A3,3 0 0,1 2,-9');
 
   // VM host nodes: rounded rect with a vertical list of child VMs
   node.filter(d => d.type === 'device' && (d.virtual_children || []).length > 0)
