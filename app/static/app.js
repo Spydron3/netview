@@ -98,12 +98,12 @@ async function saveSettings() {
   }
 }
 
-async function sendTestEmail(type = 'new_device') {
+async function sendTestEmail() {
   const msg = el('s-test-msg');
   msg.textContent = 'Sending…';
   msg.style.color = '';
   try {
-    await apiFetch(`/api/settings/test-email?type=${type}`, { method: 'POST' });
+    await apiFetch('/api/settings/test-email', { method: 'POST' });
     msg.textContent = 'Sent!';
     msg.style.color = 'var(--green)';
   } catch (e) {

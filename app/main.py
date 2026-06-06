@@ -21,7 +21,7 @@ from scanner import get_network_range, scan_network
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_VERSION = 15
+APP_VERSION = 16
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
@@ -261,13 +261,21 @@ def _run_scan() -> None:
                 )
             )
 
-        if new_devices and get_setting("notify_new_device", "false").lower() == "true":
+        notify_new = get_setting("notify_new_device", "false")
+        notify_ip  = get_setting("notify_ip_change",  "false")
+        logger.info(
+            "Scan complete: %d new device(s), %d IP change(s) — "
+            "notify_new_device=%r notify_ip_change=%r",
+            len(new_devices), len(ip_changes), notify_new, notify_ip,
+        )
+
+        if new_devices and notify_new.lower() == "true":
             threading.Thread(
                 target=lambda: _send_new_device_email(new_devices),
                 daemon=True, name="email-notify",
             ).start()
 
-        if ip_changes and get_setting("notify_ip_change", "false").lower() == "true":
+        if ip_changes and notify_ip.lower() == "true":
             threading.Thread(
                 target=lambda c=ip_changes: _send_ip_change_email(c),
                 daemon=True, name="email-ip-change",
@@ -897,22 +905,14 @@ def api_put_settings(body: SettingsUpdate):
 
 
 @app.post("/api/settings/test-email")
-def api_test_email(type: str = "new_device"):
+def api_test_email():
     try:
-        if type == "ip_change":
-            _send_ip_change_email([{
-                "name": "test-device",
-                "mac_address": "aa:bb:cc:dd:ee:ff",
-                "old_ip": "192.168.1.10",
-                "new_ip": "192.168.1.20",
-            }])
-        else:
-            _send_new_device_email([{
-                "ip_address": "192.168.1.1",
-                "hostname": "test-device.local",
-                "mac_address": "aa:bb:cc:dd:ee:ff",
-                "vendor": "Test (NetViewMyHome configuration check)",
-            }])
+        _send_new_device_email([{
+            "ip_address": "192.168.1.1",
+            "hostname": "test-device.local",
+            "mac_address": "aa:bb:cc:dd:ee:ff",
+            "vendor": "Test (NetViewMyHome configuration check)",
+        }])
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return {"status": "ok"}
