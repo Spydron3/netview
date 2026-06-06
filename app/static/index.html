@@ -368,6 +368,49 @@
   </div>
 </div>
 
+<!-- ── wlan modal ── -->
+<div id="wlan-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-backdrop" onclick="closeWlanModal()"></div>
+  <div class="modal-panel">
+    <div class="modal-header">
+      <div>
+        <h2 id="wlan-modal-title">WLANs</h2>
+        <div id="wlan-modal-sub" class="modal-subtitle"></div>
+      </div>
+      <button class="modal-close" onclick="closeWlanModal()">✕</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto; max-height:calc(100vh - 220px)">
+
+      <table class="ports-table" id="wlan-table">
+        <thead>
+          <tr><th>SSID</th><th>Band</th><th></th></tr>
+        </thead>
+        <tbody id="wlan-tbody"></tbody>
+      </table>
+      <p id="wlan-empty" class="empty-sw hidden">No WLANs configured yet.</p>
+
+      <div class="add-port-section">
+        <div class="add-port-header">Add WLAN</div>
+        <div class="add-port-form">
+          <div class="add-port-row">
+            <label>SSID</label>
+            <input id="wlan-new-ssid" type="text" class="port-input" placeholder="MyNetwork" maxlength="64" />
+            <label>Band</label>
+            <select id="wlan-new-band" class="port-select">
+              <option value="2.4">2.4 GHz</option>
+              <option value="5" selected>5 GHz</option>
+              <option value="6">6 GHz</option>
+            </select>
+            <button class="btn btn-sm" onclick="addWlan()">Add</button>
+          </div>
+          <p id="wlan-error" class="form-error"></p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script src="/static/app.js"></script>
 </body>

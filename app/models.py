@@ -30,8 +30,9 @@ class Device(Base):
     is_switch   = Column(Boolean, default=False, nullable=False, server_default="false")
     is_virtual  = Column(Boolean, default=False, nullable=False, server_default="false")
     parent_id   = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True)
-    is_wireless = Column(Boolean, default=False, nullable=False, server_default="false")
-    room_id     = Column(Integer, ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)
+    is_wireless     = Column(Boolean, default=False, nullable=False, server_default="false")
+    is_access_point = Column(Boolean, default=False, nullable=False, server_default="false")
+    room_id         = Column(Integer, ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)
 
 
 class Setting(Base):
@@ -82,6 +83,15 @@ class TopologyPosition(Base):
     node_id = Column(String(50), primary_key=True)
     x       = Column(Float, nullable=False)
     y       = Column(Float, nullable=False)
+
+
+class Wlan(Base):
+    __tablename__ = "wlans"
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    device_id = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False)
+    ssid      = Column(String(64), nullable=False)
+    band      = Column(String(5), nullable=False)  # "2.4" | "5" | "6"
 
 
 class ScanRun(Base):

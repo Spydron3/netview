@@ -110,7 +110,7 @@ function showSettingsMsg(text, error = false) {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeSettings(); closePortsModal(); closeDevicePortsModal(); }
+  if (e.key === 'Escape') { closeSettings(); closePortsModal(); closeDevicePortsModal(); closeWlanModal(); }
 });
 
 // ── data loading ──────────────────────────────────────────────────────────────
@@ -250,6 +250,10 @@ function renderDevices(devices) {
           <input type="checkbox" ${d.is_switch ? 'checked' : ''} onchange="toggleSwitch(${d.id}, this.checked)" />
           Switch
         </label>
+        <label class="device-virtual-label">
+          <input type="checkbox" ${d.is_access_point ? 'checked' : ''} onchange="toggleAccessPoint(${d.id}, this.checked)" />
+          Access Point
+        </label>
         ${d.is_virtual ? `
           <select class="virtual-parent-select" onchange="setVirtualParent(${d.id}, this.value)">
             <option value="">— no parent —</option>
@@ -261,6 +265,11 @@ function renderDevices(devices) {
       </div>
       ${d.is_switch ? `
       <button class="btn btn-sm btn-ghost" onclick="openPortsModal(${d.id})" style="margin:4px 0 0">Manage Ports</button>
+      ` : ''}
+      ${d.is_access_point ? `
+      <button class="btn btn-sm btn-ghost" onclick="openWlanModal(${d.id})" style="margin:4px 0 0">
+        ${(d.wlans || []).length > 0 ? `${d.wlans.length} WLAN${d.wlans.length !== 1 ? 's' : ''}` : 'Manage WLANs'}
+      </button>
       ` : ''}
       <div class="device-room-row">
         <select class="room-select" onchange="onRoomSelect(${d.id}, this)">
@@ -274,7 +283,7 @@ function renderDevices(devices) {
           onblur="cancelNewRoom(this)" />
       </div>
       <div class="device-footer">
-        ${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
+        ${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_access_point ? `<span class="device-ap-badge">AP</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}
         ${d.is_online
           ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}`
           : `Offline · last seen ${timeAgo(new Date(d.last_seen + 'Z'))}`}
@@ -311,6 +320,15 @@ async function toggleSwitch(deviceId, isSwitch) {
   });
   await loadDevices();
   if (currentTab === 'topology') await loadTopologyTab();
+}
+
+async function toggleAccessPoint(deviceId, isAP) {
+  await apiFetch(`/api/devices/${deviceId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_access_point: isAP }),
+  });
+  await loadDevices();
 }
 
 async function setVirtualParent(deviceId, parentIdStr) {
@@ -485,6 +503,64 @@ async function connectDP() {
   } catch (e) {
     el('dp-error').textContent = e.message || 'Failed to connect.';
   }
+}
+
+// ── wlan modal ───────────────────────────────────────────────────────────────
+
+let _wlanModalDeviceId = null;
+
+async function openWlanModal(deviceId) {
+  _wlanModalDeviceId = deviceId;
+  const dev = allDevices.find(d => d.id === deviceId);
+  el('wlan-modal-title').textContent = 'WLANs';
+  el('wlan-modal-sub').textContent = dev ? (dev.name || dev.ip_address || 'Device ' + deviceId) : '';
+  el('wlan-new-ssid').value = '';
+  el('wlan-error').textContent = '';
+  el('wlan-modal').classList.remove('hidden');
+  await refreshWlanModal();
+}
+
+function closeWlanModal() {
+  el('wlan-modal').classList.add('hidden');
+  _wlanModalDeviceId = null;
+}
+
+async function refreshWlanModal() {
+  if (!_wlanModalDeviceId) return;
+  const wlans = await apiFetch(`/api/devices/${_wlanModalDeviceId}/wlans`);
+  const tbody = el('wlan-tbody');
+  el('wlan-empty').classList.toggle('hidden', wlans.length > 0);
+  el('wlan-table').style.display = wlans.length ? '' : 'none';
+  tbody.innerHTML = wlans.map(w => `
+    <tr>
+      <td>${esc(w.ssid)}</td>
+      <td>${esc(w.band)} GHz</td>
+      <td><button class="btn btn-sm btn-ghost btn-danger" onclick="deleteWlan(${w.id})">Delete</button></td>
+    </tr>
+  `).join('');
+}
+
+async function addWlan() {
+  const ssid = el('wlan-new-ssid').value.trim();
+  const band = el('wlan-new-band').value;
+  el('wlan-error').textContent = '';
+  if (!ssid) { el('wlan-error').textContent = 'SSID must not be empty.'; return; }
+  try {
+    await apiFetch(`/api/devices/${_wlanModalDeviceId}/wlans`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ssid, band }),
+    });
+    el('wlan-new-ssid').value = '';
+    await Promise.all([refreshWlanModal(), loadDevices()]);
+  } catch (e) {
+    el('wlan-error').textContent = e.message || 'Failed to add WLAN.';
+  }
+}
+
+async function deleteWlan(wlanId) {
+  await apiFetch(`/api/devices/${_wlanModalDeviceId}/wlans/${wlanId}`, { method: 'DELETE' });
+  await Promise.all([refreshWlanModal(), loadDevices()]);
 }
 
 // ── name editing ─────────────────────────────────────────────────────────────

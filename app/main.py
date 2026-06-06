@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from database import get_db, get_setting, init_db, set_setting
 from sqlalchemy.orm import aliased as _aliased
-from models import Device, DevicePort, PortLink, Room, ScanRun, Setting, SwitchPort, TopologyPosition
+from models import Device, DevicePort, PortLink, Room, ScanRun, Setting, SwitchPort, TopologyPosition, Wlan
 from scanner import get_network_range, scan_network
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -246,6 +246,12 @@ def api_stats():
 
 # ── devices ───────────────────────────────────────────────────────────────────
 
+def _device_wlans(db, device_id: int) -> list:
+    return db.execute(
+        sa.select(Wlan).where(Wlan.device_id == device_id).order_by(Wlan.band, Wlan.ssid)
+    ).scalars().all()
+
+
 def _device_ports(db, device_id: int) -> list:
     """Returns list of (SwitchPort, Device[switch], DevicePort) for the given device."""
     SwDev = _aliased(Device)
@@ -278,8 +284,12 @@ def api_devices():
         conns: dict[int, list] = {}
         for sp, sw, dp in conn_rows:
             conns.setdefault(dp.device_id, []).append((sp, sw, dp))
+        wlan_rows = db.execute(sa.select(Wlan)).scalars().all()
+        wlans_by_device: dict[int, list] = {}
+        for w in wlan_rows:
+            wlans_by_device.setdefault(w.device_id, []).append(w)
         rooms = _rooms_dict(db)
-        return [_device_to_dict(dev, conns.get(dev.id, []), rooms) for dev in devices]
+        return [_device_to_dict(dev, conns.get(dev.id, []), rooms, wlans_by_device.get(dev.id, [])) for dev in devices]
 
 
 @app.get("/api/devices/{device_id}")
@@ -288,7 +298,7 @@ def api_device(device_id: int):
         dev = db.get(Device, device_id)
         if not dev:
             raise HTTPException(status_code=404, detail="Device not found")
-        return _device_to_dict(dev, _device_ports(db, device_id), _rooms_dict(db))
+        return _device_to_dict(dev, _device_ports(db, device_id), _rooms_dict(db), _device_wlans(db, device_id))
 
 
 class DeviceUpdate(BaseModel):
@@ -297,6 +307,7 @@ class DeviceUpdate(BaseModel):
     is_virtual: bool | None = None
     parent_id: int | None = None
     is_wireless: bool | None = None
+    is_access_point: bool | None = None
     room_id: int | None = None
 
 
@@ -316,6 +327,8 @@ def api_update_device(device_id: int, body: DeviceUpdate):
                 d.parent_id = None
         if "is_wireless" in body.model_fields_set:
             d.is_wireless = bool(body.is_wireless)
+        if "is_access_point" in body.model_fields_set:
+            d.is_access_point = bool(body.is_access_point)
         if "parent_id" in body.model_fields_set:
             if body.parent_id is not None:
                 parent = db.get(Device, body.parent_id)
@@ -330,7 +343,7 @@ def api_update_device(device_id: int, body: DeviceUpdate):
             d.room_id = body.room_id
         db.flush()
         rooms = _rooms_dict(db)
-        return _device_to_dict(d, _device_ports(db, device_id), rooms)
+        return _device_to_dict(d, _device_ports(db, device_id), rooms, _device_wlans(db, device_id))
 
 
 # ── device ports (interfaces) ─────────────────────────────────────────────────
@@ -397,7 +410,7 @@ def api_connect_device_port(device_id: int, body: DeviceConnectionCreate):
             raise HTTPException(status_code=409, detail="Device interface already connected")
         db.add(PortLink(port_a_id=body.switch_port_id, dev_port_id=body.dev_port_id))
         db.flush()
-        return _device_to_dict(db.get(Device, device_id), _device_ports(db, device_id), _rooms_dict(db))
+        return _device_to_dict(db.get(Device, device_id), _device_ports(db, device_id), _rooms_dict(db), _device_wlans(db, device_id))
 
 
 @app.delete("/api/devices/{device_id}/ports/{port_id}", status_code=204)
@@ -415,6 +428,76 @@ def api_disconnect_device_port(device_id: int, port_id: int):
         if not lnk:
             raise HTTPException(status_code=404, detail="Connection not found")
         db.delete(lnk)
+
+
+# ── wlans ─────────────────────────────────────────────────────────────────────
+
+_VALID_BANDS = {"2.4", "5", "6"}
+
+
+class WlanCreate(BaseModel):
+    ssid: str
+    band: str
+
+
+class WlanUpdate(BaseModel):
+    ssid: str | None = None
+    band: str | None = None
+
+
+@app.get("/api/devices/{device_id}/wlans")
+def api_list_wlans(device_id: int):
+    with get_db() as db:
+        if not db.get(Device, device_id):
+            raise HTTPException(status_code=404, detail="Device not found")
+        return [{"id": w.id, "ssid": w.ssid, "band": w.band} for w in _device_wlans(db, device_id)]
+
+
+@app.post("/api/devices/{device_id}/wlans", status_code=201)
+def api_create_wlan(device_id: int, body: WlanCreate):
+    ssid = body.ssid.strip()
+    if not ssid:
+        raise HTTPException(status_code=422, detail="ssid must not be empty")
+    if body.band not in _VALID_BANDS:
+        raise HTTPException(status_code=422, detail=f"band must be one of {sorted(_VALID_BANDS)}")
+    with get_db() as db:
+        dev = db.get(Device, device_id)
+        if not dev:
+            raise HTTPException(status_code=404, detail="Device not found")
+        if not dev.is_access_point:
+            raise HTTPException(status_code=422, detail="Device is not an access point")
+        w = Wlan(device_id=device_id, ssid=ssid, band=body.band)
+        db.add(w)
+        db.flush()
+        return {"id": w.id, "ssid": w.ssid, "band": w.band}
+
+
+@app.patch("/api/devices/{device_id}/wlans/{wlan_id}")
+def api_update_wlan(device_id: int, wlan_id: int, body: WlanUpdate):
+    with get_db() as db:
+        w = db.get(Wlan, wlan_id)
+        if not w or w.device_id != device_id:
+            raise HTTPException(status_code=404, detail="WLAN not found")
+        if "ssid" in body.model_fields_set:
+            ssid = (body.ssid or "").strip()
+            if not ssid:
+                raise HTTPException(status_code=422, detail="ssid must not be empty")
+            w.ssid = ssid
+        if "band" in body.model_fields_set:
+            if body.band not in _VALID_BANDS:
+                raise HTTPException(status_code=422, detail=f"band must be one of {sorted(_VALID_BANDS)}")
+            w.band = body.band
+        db.flush()
+        return {"id": w.id, "ssid": w.ssid, "band": w.band}
+
+
+@app.delete("/api/devices/{device_id}/wlans/{wlan_id}", status_code=204)
+def api_delete_wlan(device_id: int, wlan_id: int):
+    with get_db() as db:
+        w = db.get(Wlan, wlan_id)
+        if not w or w.device_id != device_id:
+            raise HTTPException(status_code=404, detail="WLAN not found")
+        db.delete(w)
 
 
 # ── rooms ─────────────────────────────────────────────────────────────────────
@@ -1263,7 +1346,7 @@ def _rooms_dict(db) -> dict[int, str]:
     return {r.id: r.name for r in db.execute(sa.select(Room)).scalars().all()}
 
 
-def _device_to_dict(d: Device, ports: list | None = None, rooms: dict | None = None) -> dict:
+def _device_to_dict(d: Device, ports: list | None = None, rooms: dict | None = None, wlans: list | None = None) -> dict:
     return {
         "id": d.id,
         "ip_address": d.ip_address,
@@ -1282,6 +1365,7 @@ def _device_to_dict(d: Device, ports: list | None = None, rooms: dict | None = N
         "is_virtual": d.is_virtual,
         "parent_id": d.parent_id,
         "is_wireless": d.is_wireless,
+        "is_access_point": d.is_access_point,
         "room_id": d.room_id,
         "room": rooms.get(d.room_id) if (rooms is not None and d.room_id) else None,
         "switch_ports": [
@@ -1299,6 +1383,7 @@ def _device_to_dict(d: Device, ports: list | None = None, rooms: dict | None = N
             }
             for p, sw, dp in (ports or [])
         ],
+        "wlans": [{"id": w.id, "ssid": w.ssid, "band": w.band} for w in (wlans or [])],
     }
 
 
