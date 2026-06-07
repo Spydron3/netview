@@ -369,10 +369,10 @@ def _run_scan() -> None:
         _scan_lock.release()
 
 
-@asynccontextmanager
 LOG_FILE = os.environ.get("LOG_FILE", "/tmp/netview.log")
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
 
