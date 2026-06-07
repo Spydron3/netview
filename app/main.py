@@ -15,13 +15,13 @@ from pydantic import BaseModel
 
 from database import get_db, get_setting, init_db, set_setting
 from sqlalchemy.orm import aliased as _aliased
-from models import Device, DeviceIPHistory, DevicePort, PortLink, Room, ScanRun, Setting, SwitchPort, TopologyPosition, Wlan
+from models import Device, DeviceIPHistory, DevicePort, Notification, PortLink, Room, ScanRun, Setting, SwitchPort, TopologyPosition, Wlan
 from scanner import get_network_range, scan_network
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_VERSION = 18
+APP_VERSION = 19
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
@@ -29,6 +29,52 @@ _scheduler  = BackgroundScheduler(daemon=True)
 
 _VALID_PORT_TYPES = {"RJ45", "SFP+"}
 _VALID_SPEEDS     = {"10M", "100M", "1G", "2.5G", "10G", "25G", "40G", "100G"}
+
+
+# ── notifications ──────────────────────────────────────────────────────────────
+
+def _create_notification(ntype: str, title: str, body: str | None = None) -> None:
+    try:
+        with get_db() as db:
+            db.add(Notification(
+                type=ntype,
+                title=title[:255],
+                body=body[:2000] if body else None,
+                created_at=datetime.utcnow(),
+            ))
+            db.flush()
+            old_ids = db.execute(
+                sa.select(Notification.id)
+                .order_by(Notification.created_at.desc())
+                .offset(200)
+            ).scalars().all()
+            if old_ids:
+                db.execute(sa.delete(Notification).where(Notification.id.in_(old_ids)))
+    except Exception:
+        pass
+
+
+_notif_tl = threading.local()
+
+
+class _DBNotifHandler(logging.Handler):
+    """Captures WARNING/ERROR log records from the main logger into the notifications table."""
+    def emit(self, record: logging.LogRecord) -> None:
+        if getattr(_notif_tl, "active", False):
+            return
+        _notif_tl.active = True
+        try:
+            ntype = "error" if record.levelno >= logging.ERROR else "warning"
+            msg   = record.getMessage()
+            body: str | None = None
+            if record.exc_info:
+                import traceback as _tb
+                body = "".join(_tb.format_exception(*record.exc_info))
+            _create_notification(ntype, msg[:255], body)
+        except Exception:
+            pass
+        finally:
+            _notif_tl.active = False
 
 
 def _norm_mac(mac: str | None) -> str | None:
@@ -261,6 +307,19 @@ def _run_scan() -> None:
                 )
             )
 
+        for change in ip_changes:
+            _create_notification(
+                "ip_change",
+                f"IP change: {change['name'] or change['mac_address'] or 'unknown'}",
+                f"{change['old_ip']} → {change['new_ip']}",
+            )
+        for d in new_devices:
+            _create_notification(
+                "new_device",
+                f"New device: {d['ip_address']}",
+                f"Hostname: {d['hostname'] or '—'}   MAC: {d['mac_address'] or '—'}",
+            )
+
         notify_new = get_setting("notify_new_device", "false")
         notify_ip  = get_setting("notify_ip_change",  "false")
         logger.info(
@@ -305,6 +364,10 @@ def _run_scan() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+
+    _db_notif_handler = _DBNotifHandler()
+    _db_notif_handler.setLevel(logging.WARNING)
+    logging.getLogger("main").addHandler(_db_notif_handler)
 
     interval = int(get_setting("scan_interval", os.environ.get("SCAN_INTERVAL", "300")))
     _scheduler.add_job(_run_scan, "interval", seconds=interval, id="network_scan")
@@ -915,6 +978,49 @@ def api_test_email():
         }])
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+    return {"status": "ok"}
+
+
+# ── notifications ─────────────────────────────────────────────────────────────
+
+@app.get("/api/notifications")
+def api_get_notifications():
+    with get_db() as db:
+        rows = db.execute(
+            sa.select(Notification).order_by(Notification.created_at.desc()).limit(100)
+        ).scalars().all()
+        unread = sum(1 for r in rows if r.read_at is None)
+        return {
+            "unread": unread,
+            "items": [
+                {
+                    "id": r.id,
+                    "type": r.type,
+                    "title": r.title,
+                    "body": r.body,
+                    "created_at": r.created_at.isoformat(),
+                    "read": r.read_at is not None,
+                }
+                for r in rows
+            ],
+        }
+
+
+@app.post("/api/notifications/read-all")
+def api_notif_read_all():
+    with get_db() as db:
+        db.execute(
+            sa.update(Notification)
+            .where(Notification.read_at.is_(None))
+            .values(read_at=datetime.utcnow())
+        )
+    return {"status": "ok"}
+
+
+@app.delete("/api/notifications")
+def api_notif_clear():
+    with get_db() as db:
+        db.execute(sa.delete(Notification))
     return {"status": "ok"}
 
 

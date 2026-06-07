@@ -103,6 +103,17 @@ class DeviceIPHistory(Base):
     changed_at = Column(DateTime, nullable=False)
 
 
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    type       = Column(String(20), nullable=False)   # new_device | ip_change | error | warning
+    title      = Column(String(255), nullable=False)
+    body       = Column(String(2000), nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    read_at    = Column(DateTime, nullable=True)
+
+
 class ScanRun(Base):
     __tablename__ = "scan_runs"
 

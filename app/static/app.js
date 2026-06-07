@@ -5,15 +5,23 @@ let allPorts   = [];   // flat list from GET /api/ports — used for device drop
 let allRooms   = [];
 let pollTimer  = null;
 let currentTab = 'devices';
+let _notifOpen = false;
 
 // ── bootstrap ─────────────────────────────────────────────────────────────────
 
 (async function init() {
   const savedOffline = localStorage.getItem('showOffline');
   if (savedOffline !== null) el('show-offline').checked = savedOffline === 'true';
-  await Promise.all([loadRooms(), loadStats(), loadHistory(), loadAllPorts(), loadVersion()]);
+  await Promise.all([loadRooms(), loadStats(), loadHistory(), loadAllPorts(), loadVersion(), loadNotifications()]);
   await loadDevices();
   startAutoRefresh();
+  setInterval(loadNotifications, 30_000);
+  document.addEventListener('click', e => {
+    if (_notifOpen && !el('notif-wrapper').contains(e.target)) {
+      el('notif-panel').classList.add('hidden');
+      _notifOpen = false;
+    }
+  });
 })();
 
 async function loadVersion() {
@@ -1354,4 +1362,70 @@ function fmt(date) {
 
 function _truncate(s, n) {
   return s && s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+// ── notifications ─────────────────────────────────────────────────────────────
+
+const _NOTIF_ICONS = {
+  new_device: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',
+  ip_change:  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4m0 0L3 8m4-4 4 4M17 8v12m0 0 4-4m-4 4-4-4"/></svg>',
+  error:      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+  warning:    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+};
+
+function _renderNotifications(items) {
+  const list = el('notif-list');
+  if (!items || !items.length) {
+    list.innerHTML = '<div class="notif-empty">No notifications</div>';
+    return;
+  }
+  list.innerHTML = items.map(n => `
+    <div class="notif-item notif-${n.type}${n.read ? '' : ' notif-unread'}">
+      <div class="notif-icon">${_NOTIF_ICONS[n.type] || _NOTIF_ICONS.warning}</div>
+      <div class="notif-content">
+        <div class="notif-title">${esc(n.title)}</div>
+        ${n.body ? `<div class="notif-body">${esc(n.body)}</div>` : ''}
+        <div class="notif-time">${new Date(n.created_at + 'Z').toLocaleString()}</div>
+      </div>
+    </div>`).join('');
+}
+
+async function loadNotifications() {
+  try {
+    const data = await apiFetch('/api/notifications');
+    const badge = el('notif-badge');
+    if (data.unread > 0) {
+      badge.textContent = data.unread > 99 ? '99+' : data.unread;
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+    if (_notifOpen) _renderNotifications(data.items);
+    return data;
+  } catch (_) {}
+}
+
+async function toggleNotifications() {
+  const panel = el('notif-panel');
+  _notifOpen = !_notifOpen;
+  if (_notifOpen) {
+    panel.classList.remove('hidden');
+    const data = await loadNotifications();
+    if (data) _renderNotifications(data.items);
+  } else {
+    panel.classList.add('hidden');
+  }
+}
+
+async function markAllRead() {
+  await apiFetch('/api/notifications/read-all', { method: 'POST' });
+  const data = await apiFetch('/api/notifications');
+  el('notif-badge').classList.add('hidden');
+  _renderNotifications(data.items);
+}
+
+async function clearNotifications() {
+  await apiFetch('/api/notifications', { method: 'DELETE' });
+  el('notif-list').innerHTML = '<div class="notif-empty">No notifications</div>';
+  el('notif-badge').classList.add('hidden');
 }
