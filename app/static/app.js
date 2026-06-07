@@ -42,6 +42,13 @@ function switchTab(name) {
 
 // ── settings ──────────────────────────────────────────────────────────────────
 
+function switchSettingsTab(name) {
+  document.querySelectorAll('.settings-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.settings-tab-content').forEach(c =>
+    c.classList.toggle('hidden', c.dataset.tab !== name));
+}
+
 async function openSettings() {
   try {
     const s = await apiFetch('/api/settings');

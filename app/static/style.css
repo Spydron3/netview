@@ -453,40 +453,37 @@ tr:hover td { background: var(--surface2); }
 .input-with-unit { display: flex; align-items: center; gap: 8px; }
 .input-with-unit span { font-size: 13px; color: var(--muted); white-space: nowrap; }
 
-.setting-section {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.setting-section > summary {
-  list-style: none;
-  padding: 10px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--muted);
-  background: var(--surface2);
-  cursor: pointer;
+.settings-tabs {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  user-select: none;
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  flex-shrink: 0;
 }
-.setting-section > summary::-webkit-details-marker { display: none; }
-.setting-section > summary::after {
-  content: '›';
-  font-size: 16px;
-  line-height: 1;
-  transition: transform 0.15s;
+.settings-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  margin-bottom: -1px;
+  border-radius: 0;
+  transition: color 0.15s, border-color 0.15s;
 }
-.setting-section[open] > summary::after { transform: rotate(90deg); }
-.setting-section-body {
+.settings-tab:hover { color: var(--text); }
+.settings-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+.settings-tab-content {
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
+  flex: 1;
+  overflow-y: auto;
+  max-height: calc(100vh - 220px);
 }
+.settings-tab-content.hidden { display: none; }
 
 #smtp-fields { display: none; }
 
@@ -1123,6 +1120,7 @@ tr:hover td { background: var(--surface2); }
 
 /* ── notification panel ───────────────────────────────────────────────────── */
 .notif-wrapper { position: relative; }
+.notif-panel.hidden { display: none; }
 .notif-panel {
   position: absolute;
   top: calc(100% + 8px);
