@@ -1170,6 +1170,7 @@ tr:hover td { background: var(--surface2); }
 .notif-title { font-size: 0.8rem; font-weight: 500; color: var(--text); word-break: break-word; }
 .notif-body  { font-size: 0.75rem; color: var(--muted); margin-top: 2px; font-family: ui-monospace, monospace; white-space: pre-wrap; word-break: break-all; max-height: 80px; overflow: hidden; }
 .notif-time  { font-size: 0.7rem; color: var(--muted); margin-top: 4px; }
+.notif-badge.hidden { display: none; }
 .notif-badge {
   position: absolute;
   top: 3px; right: 3px;
