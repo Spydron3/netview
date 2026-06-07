@@ -487,6 +487,34 @@ tr:hover td { background: var(--surface2); }
 
 #smtp-fields { display: none; }
 
+/* ── log tab ── */
+#settings-modal .modal-panel-log { width: min(720px, calc(100vw - 32px)); }
+.log-tab-content { padding: 0; gap: 0; }
+.log-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.log-viewer {
+  flex: 1;
+  overflow: auto;
+  padding: 10px 14px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 0;
+  white-space: pre;
+  max-height: calc(100vh - 260px);
+  background: transparent;
+  border: none;
+}
+.log-error   { color: var(--red); }
+.log-warning { color: #f59e0b; }
+.log-info    { color: var(--text); }
+
 .modal-body input[type="number"],
 .modal-body input[type="text"],
 .modal-body input[type="email"],

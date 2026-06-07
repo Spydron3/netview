@@ -47,6 +47,32 @@ function switchSettingsTab(name) {
     t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.settings-tab-content').forEach(c =>
     c.classList.toggle('hidden', c.dataset.tab !== name));
+  const panel = document.querySelector('#settings-modal .modal-panel');
+  if (panel) panel.classList.toggle('modal-panel-log', name === 'log');
+  if (name === 'log') loadLog();
+}
+
+async function loadLog() {
+  const viewer = el('log-viewer');
+  if (!viewer) return;
+  try {
+    const data = await apiFetch('/api/log?lines=500');
+    const html = (data.content || '').split('\n').map(line => {
+      const safe = esc(line);
+      if (/ ERROR /.test(line))   return `<span class="log-error">${safe}</span>`;
+      if (/ WARNING /.test(line)) return `<span class="log-warning">${safe}</span>`;
+      if (/ INFO /.test(line))    return `<span class="log-info">${safe}</span>`;
+      return safe;
+    }).join('\n');
+    viewer.innerHTML = html || '<span style="color:var(--muted)">No log entries yet.</span>';
+    viewer.scrollTop = viewer.scrollHeight;
+  } catch (_) {
+    viewer.textContent = 'Failed to load log.';
+  }
+}
+
+function downloadLog() {
+  window.open('/api/log/download', '_blank');
 }
 
 async function openSettings() {

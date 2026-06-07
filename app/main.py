@@ -1,4 +1,5 @@
 import logging
+import logging.handlers as _lh
 import os
 import smtplib
 import threading
@@ -21,7 +22,7 @@ from scanner import get_network_range, scan_network
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_VERSION = 22
+APP_VERSION = 23
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
@@ -369,8 +370,17 @@ def _run_scan() -> None:
 
 
 @asynccontextmanager
+LOG_FILE = os.environ.get("LOG_FILE", "/tmp/netview.log")
+
+
 async def lifespan(app: FastAPI):
     init_db()
+
+    _fh = _lh.RotatingFileHandler(
+        LOG_FILE, maxBytes=4 * 1024 * 1024, backupCount=1, encoding="utf-8"
+    )
+    _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.getLogger().addHandler(_fh)
 
     _db_notif_handler = _DBNotifHandler()
     _db_notif_handler.setLevel(logging.WARNING)
@@ -986,6 +996,25 @@ def api_test_email():
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return {"status": "ok"}
+
+
+# ── log ───────────────────────────────────────────────────────────────────────
+
+@app.get("/api/log")
+def api_get_log(lines: int = 500):
+    try:
+        with open(LOG_FILE, encoding="utf-8", errors="replace") as f:
+            content = f.readlines()
+        return {"content": "".join(content[-lines:])}
+    except FileNotFoundError:
+        return {"content": ""}
+
+
+@app.get("/api/log/download")
+def api_download_log():
+    if not os.path.exists(LOG_FILE):
+        raise HTTPException(status_code=404, detail="Log file not found")
+    return FileResponse(LOG_FILE, filename="netview.log", media_type="text/plain")
 
 
 # ── notifications ─────────────────────────────────────────────────────────────

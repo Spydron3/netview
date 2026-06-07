@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NetViewMyHome</title>
   <link rel="icon" type="image/svg+xml" href="/static/logo-icon.svg" />
-  <link rel="stylesheet" href="/static/style.css?v=22" />
+  <link rel="stylesheet" href="/static/style.css?v=23" />
 </head>
 <body>
 
@@ -170,6 +170,7 @@
       <div class="settings-tabs">
         <button class="settings-tab active" data-tab="scanning" onclick="switchSettingsTab('scanning')">Scanning</button>
         <button class="settings-tab" data-tab="notifications" onclick="switchSettingsTab('notifications')">Notifications</button>
+        <button class="settings-tab" data-tab="log" onclick="switchSettingsTab('log')">Log</button>
       </div>
       <div class="settings-tab-content" data-tab="scanning">
         <div class="setting-row">
@@ -249,6 +250,13 @@
             <span id="s-test-msg" class="settings-msg" style="margin-left:8px"></span>
           </div>
         </div>
+      </div>
+      <div class="settings-tab-content hidden log-tab-content" data-tab="log">
+        <div class="log-toolbar">
+          <button class="btn btn-sm btn-ghost" onclick="loadLog()">↻ Refresh</button>
+          <button class="btn btn-sm btn-ghost" onclick="downloadLog()">↓ Download</button>
+        </div>
+        <pre class="log-viewer" id="log-viewer">Loading…</pre>
       </div>
     </div>
     <div class="modal-footer">
@@ -436,6 +444,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
-<script src="/static/app.js?v=22"></script>
+<script src="/static/app.js?v=23"></script>
 </body>
 </html>
