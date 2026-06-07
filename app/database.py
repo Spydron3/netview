@@ -265,6 +265,7 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                     "port_scan_enabled": os.environ.get("PORT_SCAN_ENABLED", "true"),
                     "network_range": os.environ.get("NETWORK_RANGE", ""),
                     "notify_new_device": "false",
+                    "notify_ip_change": "false",
                     "smtp_host": os.environ.get("SMTP_HOST", ""),
                     "smtp_port": os.environ.get("SMTP_PORT", "587"),
                     "smtp_user": os.environ.get("SMTP_USER", ""),
