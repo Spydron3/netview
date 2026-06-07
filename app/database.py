@@ -264,8 +264,8 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                     "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),
                     "port_scan_enabled": os.environ.get("PORT_SCAN_ENABLED", "true"),
                     "network_range": os.environ.get("NETWORK_RANGE", ""),
-                    "notify_new_device": "false",
-                    "notify_ip_change": "false",
+                    "notify_new_device": os.environ.get("NOTIFY_NEW_DEVICE", "false"),
+                    "notify_ip_change":  os.environ.get("NOTIFY_IP_CHANGE",  "false"),
                     "smtp_host": os.environ.get("SMTP_HOST", ""),
                     "smtp_port": os.environ.get("SMTP_PORT", "587"),
                     "smtp_user": os.environ.get("SMTP_USER", ""),
@@ -279,6 +279,17 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                         "INSERT INTO settings (key, value) VALUES (:k, :v) "
                         "ON CONFLICT (key) DO NOTHING"
                     ), {"k": key, "v": value})
+                # Env-var overrides: when explicitly set, always win over DB value
+                env_overrides = {
+                    k: v for k, v in {
+                        "notify_new_device": os.environ.get("NOTIFY_NEW_DEVICE"),
+                        "notify_ip_change":  os.environ.get("NOTIFY_IP_CHANGE"),
+                    }.items() if v is not None
+                }
+                for key, value in env_overrides.items():
+                    conn.execute(text(
+                        "UPDATE settings SET value = :v WHERE key = :k"
+                    ), {"k": key, "v": value.lower()})
                 conn.commit()
             logger.info("Database ready")
             return

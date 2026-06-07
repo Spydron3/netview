@@ -21,7 +21,7 @@ from scanner import get_network_range, scan_network
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_VERSION = 19
+APP_VERSION = 20
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
@@ -334,11 +334,18 @@ def _run_scan() -> None:
                 daemon=True, name="email-notify",
             ).start()
 
-        if ip_changes and notify_ip.lower() == "true":
-            threading.Thread(
-                target=lambda c=ip_changes: _send_ip_change_email(c),
-                daemon=True, name="email-ip-change",
-            ).start()
+        if ip_changes:
+            if notify_ip.lower() == "true":
+                threading.Thread(
+                    target=lambda c=ip_changes: _send_ip_change_email(c),
+                    daemon=True, name="email-ip-change",
+                ).start()
+            else:
+                logger.warning(
+                    "IP change email suppressed: notify_ip_change=%r "
+                    "(enable in Settings → Email Notifications and click Save)",
+                    notify_ip,
+                )
 
     except Exception as exc:
         logger.exception("Scan failed")
