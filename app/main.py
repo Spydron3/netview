@@ -21,7 +21,7 @@ from scanner import get_network_range, scan_network
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_VERSION = 17
+APP_VERSION = 18
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
@@ -211,7 +211,8 @@ def _run_scan() -> None:
                             conflict.ip_address = None
                             db.flush()
                         existing.ip_address = ip
-                        _record_ip_history(db, existing.id, old_ip, now)
+                        if old_ip:
+                            _record_ip_history(db, existing.id, old_ip, now)
                         ip_changes.append({
                             "name": existing.name or existing.hostname,
                             "mac_address": mac or existing.mac_address,
