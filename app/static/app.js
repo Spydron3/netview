@@ -343,7 +343,7 @@ function renderDevices(devices) {
           onblur="cancelNewRoom(this)" />
       </div>
       <div class="device-footer">
-        <span>${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_access_point ? `<span class="device-ap-badge">AP</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}${d.is_online ? `Online · seen ${timeAgo(new Date(d.last_seen + 'Z'))}` : `Offline · last seen ${timeAgo(new Date(d.last_seen + 'Z'))}`}</span>
+        <span>${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_access_point ? `<span class="device-ap-badge">AP</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}${(() => { const ls = new Date(d.last_seen + 'Z'); const tip = fmt(ls); return d.is_online ? `Online · seen <span title="${tip}">${timeAgo(ls)}</span>` : `Offline · last seen <span title="${tip}">${timeAgo(ls)}</span>`; })()}</span>
         <button class="device-delete-btn" onclick="deleteDevice(${d.id})">Delete</button>
       </div>
     </div>`;
