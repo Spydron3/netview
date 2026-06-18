@@ -276,10 +276,35 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.device-vendor-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  min-height: 18px;
+}
 .device-vendor {
   font-size: 12px;
   color: var(--muted);
 }
+.device-vendor-placeholder {
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.4;
+}
+.device-card:hover .device-vendor-placeholder { opacity: 1; }
+.btn-vendor-lookup {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.btn-vendor-lookup:hover { border-color: var(--blue); color: var(--blue); }
 .device-mac {
   font-family: ui-monospace, monospace;
   font-size: 11px;

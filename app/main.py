@@ -3,6 +3,8 @@ import logging.handlers as _lh
 import os
 import smtplib
 import threading
+import time
+import urllib.request
 from contextlib import asynccontextmanager
 from datetime import datetime
 from email.message import EmailMessage
@@ -182,6 +184,38 @@ def _send_ip_change_email(changes: list[dict]) -> None:
         logger.exception("Failed to send IP change email")
 
 
+def _lookup_vendor(mac: str) -> str | None:
+    """Query macvendors.com for the vendor of a MAC address. Returns None on failure."""
+    try:
+        url = f"https://api.macvendors.com/{urllib.request.quote(mac)}"
+        req = urllib.request.Request(url, headers={"Accept": "text/plain"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            if resp.status == 200:
+                return resp.read().decode().strip() or None
+    except Exception:
+        pass
+    return None
+
+
+def _fill_missing_vendors() -> None:
+    """Background task: look up vendor via macvendors.com for devices that have a MAC but no vendor."""
+    with get_db() as db:
+        devices = db.execute(
+            sa.select(Device).where(Device.mac_address.isnot(None), Device.vendor.is_(None))
+        ).scalars().all()
+        ids_macs = [(d.id, d.mac_address) for d in devices]
+
+    for device_id, mac in ids_macs:
+        vendor = _lookup_vendor(mac)
+        if vendor:
+            with get_db() as db:
+                d = db.get(Device, device_id)
+                if d and not d.vendor:
+                    d.vendor = vendor
+            logger.info("Vendor lookup: device %d (%s) → %s", device_id, mac, vendor)
+        time.sleep(0.6)  # stay under macvendors.com free-tier rate limit (2 req/s)
+
+
 def _record_ip_history(db, device_id: int, ip_address: str, changed_at: datetime) -> None:
     db.add(DeviceIPHistory(device_id=device_id, ip_address=ip_address, changed_at=changed_at))
     db.flush()
@@ -334,6 +368,8 @@ def _run_scan() -> None:
                 target=lambda: _send_new_device_email(new_devices),
                 daemon=True, name="email-notify",
             ).start()
+
+        threading.Thread(target=_fill_missing_vendors, daemon=True, name="vendor-lookup").start()
 
         if ip_changes:
             if notify_ip.lower() == "true":
@@ -523,6 +559,7 @@ def api_delete_device(device_id: int):
 
 class DeviceUpdate(BaseModel):
     name: str | None = None
+    vendor: str | None = None
     is_switch: bool | None = None
     is_virtual: bool | None = None
     parent_id: int | None = None
@@ -539,6 +576,8 @@ def api_update_device(device_id: int, body: DeviceUpdate):
             raise HTTPException(status_code=404, detail="Device not found")
         if "name" in body.model_fields_set:
             d.name = body.name.strip() if body.name and body.name.strip() else None
+        if "vendor" in body.model_fields_set:
+            d.vendor = body.vendor.strip() if body.vendor and body.vendor.strip() else None
         if "is_switch" in body.model_fields_set:
             d.is_switch = bool(body.is_switch)
         if "is_virtual" in body.model_fields_set:
@@ -561,6 +600,22 @@ def api_update_device(device_id: int, body: DeviceUpdate):
             d.parent_id = body.parent_id
         if "room_id" in body.model_fields_set:
             d.room_id = body.room_id
+        db.flush()
+        rooms = _rooms_dict(db)
+        return _device_to_dict(d, _device_ports(db, device_id), rooms, _device_wlans(db, device_id))
+
+
+@app.post("/api/devices/{device_id}/vendor-lookup")
+def api_vendor_lookup(device_id: int):
+    with get_db() as db:
+        d = db.get(Device, device_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="Device not found")
+        if not d.mac_address:
+            raise HTTPException(status_code=422, detail="Device has no MAC address")
+        vendor = _lookup_vendor(d.mac_address)
+        if vendor:
+            d.vendor = vendor
         db.flush()
         rooms = _rooms_dict(db)
         return _device_to_dict(d, _device_ports(db, device_id), rooms, _device_wlans(db, device_id))

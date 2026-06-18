@@ -273,7 +273,12 @@ function renderDevices(devices) {
           : `<span class="device-name-placeholder">+ Add name</span>`}
       </div>
       ${d.hostname ? `<div class="device-hostname">${esc(d.hostname)}</div>` : ''}
-      ${d.vendor   ? `<div class="device-vendor">${esc(d.vendor)}</div>` : ''}
+      <div class="device-vendor-row" onclick="startEditVendor(${d.id}, this)" title="Click to edit vendor">
+        ${d.vendor
+          ? `<span class="device-vendor">${esc(d.vendor)}</span>`
+          : `<span class="device-vendor-placeholder">+ Add vendor</span>`}
+        ${!d.vendor && d.mac_address ? `<button class="btn-vendor-lookup" onclick="event.stopPropagation(); lookupVendor(${d.id})" title="Look up via macvendors.com">Lookup</button>` : ''}
+      </div>
       ${d.mac_address ? `<div class="device-mac">${esc(d.mac_address)}</div>` : ''}
       ${(() => {
         const prev = (d.ip_history || []).filter(h => h.ip_address !== d.ip_address);
@@ -681,6 +686,58 @@ function startEditName(deviceId, row) {
     if (e.key === 'Enter')  { input.blur(); }
     if (e.key === 'Escape') { saved = true; applyFilter(); }
   });
+}
+
+function startEditVendor(deviceId, row) {
+  if (row.querySelector('input')) return;
+  const dev = allDevices.find(d => d.id === deviceId);
+  const current = dev?.vendor || '';
+
+  const input = document.createElement('input');
+  input.className = 'name-input';
+  input.value = current;
+  input.placeholder = 'Vendor name…';
+  row.innerHTML = '';
+  row.appendChild(input);
+  input.focus();
+  input.select();
+
+  let saved = false;
+
+  async function save() {
+    if (saved) return;
+    saved = true;
+    const vendor = input.value.trim() || null;
+    try {
+      const updated = await apiFetch(`/api/devices/${deviceId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendor }),
+      });
+      const idx = allDevices.findIndex(d => d.id === deviceId);
+      if (idx >= 0) allDevices[idx] = updated;
+    } catch (e) {
+      console.error('Failed to save vendor:', e);
+    }
+    applyFilter();
+  }
+
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { input.blur(); }
+    if (e.key === 'Escape') { saved = true; applyFilter(); }
+  });
+}
+
+async function lookupVendor(deviceId) {
+  try {
+    const updated = await apiFetch(`/api/devices/${deviceId}/vendor-lookup`, { method: 'POST' });
+    const idx = allDevices.findIndex(d => d.id === deviceId);
+    if (idx >= 0) allDevices[idx] = updated;
+    applyFilter();
+  } catch (e) {
+    console.error('Vendor lookup failed:', e);
+  }
 }
 
 // ── scan trigger ──────────────────────────────────────────────────────────────
