@@ -1164,7 +1164,7 @@ function renderTopology(data) {
   const node = nodeG.selectAll('g').data(nodes).join('g')
     .attr('class', d => {
       let cls = `topo-node topo-node-${d.type}`;
-      if (d.type === 'device' && d.is_online === false) cls += ' topo-node-offline';
+      if (d.is_online === false) cls += ' topo-node-offline';
       if (d.type === 'device' && (d.virtual_children || []).length > 0) cls += ' topo-node-vmhost';
       if ((d.type === 'device' && (d.is_wireless || d.is_access_point)) || (d.type === 'switch' && d.is_access_point)) cls += ' topo-node-wireless';
       return cls;
