@@ -260,12 +260,15 @@ def _run_scan() -> None:
                         existing.ip_address = ip
                         if old_ip:
                             _record_ip_history(db, existing.id, old_ip, now)
-                        ip_changes.append({
-                            "name": existing.name or existing.hostname,
-                            "mac_address": mac or existing.mac_address,
-                            "old_ip": old_ip,
-                            "new_ip": ip,
-                        })
+                            ip_changes.append({
+                                "name": existing.name or existing.hostname,
+                                "mac_address": mac or existing.mac_address,
+                                "old_ip": old_ip,
+                                "new_ip": ip,
+                            })
+                        else:
+                            # First IP assignment — store it as baseline, don't notify
+                            _record_ip_history(db, existing.id, ip, now)
                     existing.is_online = True
                     existing.last_seen = now
                     existing.scan_count += 1
