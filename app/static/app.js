@@ -1182,6 +1182,8 @@ function renderTopology(data) {
 
   node.filter(d => d.type === 'switch')
     .append('rect').attr('width', 52).attr('height', 34).attr('x', -26).attr('y', -17).attr('rx', 5);
+  node.filter(d => d.type === 'switch')
+    .append('circle').attr('class', 'sw-status-dot').attr('r', 3.5).attr('cx', 20).attr('cy', -11);
 
   // Regular device nodes (no virtual children)
   node.filter(d => d.type === 'device' && !(d.virtual_children || []).length)

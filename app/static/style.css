@@ -588,6 +588,8 @@ tr:hover td { background: var(--surface2); }
 
 .topo-node-switch rect          { fill: color-mix(in srgb, var(--blue) 18%, var(--surface)); stroke: var(--blue); }
 .topo-node-switch.topo-node-offline rect { fill: var(--surface2); stroke: var(--muted); stroke-dasharray: 4 2; }
+.topo-node-switch .sw-status-dot { fill: var(--green); stroke: none; }
+.topo-node-switch.topo-node-offline .sw-status-dot { fill: var(--muted); }
 .topo-node-external_switch rect { fill: color-mix(in srgb, var(--purple) 18%, var(--surface)); stroke: var(--purple); }
 .topo-node-device .node-circle                   { fill: color-mix(in srgb, var(--green) 22%, var(--surface)); stroke: var(--green); }
 .topo-node-device.topo-node-offline .node-circle { fill: var(--surface2); stroke: var(--muted); stroke-dasharray: 4 2; }
