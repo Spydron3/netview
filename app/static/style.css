@@ -178,6 +178,32 @@ main {
   outline: none;
 }
 .toolbar input[type="search"]:focus { border-color: var(--blue); }
+.filter-wrap { position: relative; }
+.filter-btn { position: relative; }
+.filter-btn-active { border-color: var(--blue) !important; color: var(--blue) !important; }
+.filter-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; background: var(--blue); color: #fff;
+  font-size: 10px; font-weight: 600; margin-left: 4px;
+}
+.filter-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 50;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
+  min-width: 160px; box-shadow: 0 4px 16px rgba(0,0,0,.3);
+}
+.filter-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+.filter-row input { cursor: pointer; }
+.filter-clear {
+  margin-top: 4px; padding: 4px 0; background: none; border: none;
+  font-size: 11px; color: var(--muted); cursor: pointer; text-align: left;
+}
+.filter-clear:hover { color: var(--red); }
+
 .toggle-label {
   display: flex;
   align-items: center;

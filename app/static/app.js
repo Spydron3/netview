@@ -21,6 +21,10 @@ let _notifOpen = false;
       el('notif-panel').classList.add('hidden');
       _notifOpen = false;
     }
+    const fw = el('filter-wrap');
+    if (fw && !fw.contains(e.target)) {
+      el('filter-panel')?.classList.add('hidden');
+    }
   });
 })();
 
@@ -379,12 +383,35 @@ async function loadHistory() {
 // ── filtering & rendering ─────────────────────────────────────────────────────
 
 function applyFilter() {
-  const q    = el('search').value.toLowerCase();
+  const q           = el('search').value.toLowerCase();
   const showOffline = el('show-offline').checked;
   localStorage.setItem('showOffline', showOffline);
 
+  const flags = {
+    switch:   el('f-switch')?.checked,
+    wireless: el('f-wireless')?.checked,
+    ap:       el('f-ap')?.checked,
+    virtual:  el('f-virtual')?.checked,
+    noIp:     el('f-no-ip')?.checked,
+    noVendor: el('f-no-vendor')?.checked,
+  };
+  const activeFlags = Object.values(flags).filter(Boolean).length;
+  const badge = el('filter-badge');
+  if (badge) {
+    badge.textContent = activeFlags;
+    badge.classList.toggle('hidden', activeFlags === 0);
+  }
+  const btn = el('filter-btn');
+  if (btn) btn.classList.toggle('filter-btn-active', activeFlags > 0);
+
   const filtered = allDevices.filter(d => {
     if (!showOffline && !d.is_online) return false;
+    if (flags.switch   && !d.is_switch)        return false;
+    if (flags.wireless && !d.is_wireless)       return false;
+    if (flags.ap       && !d.is_access_point)  return false;
+    if (flags.virtual  && !d.is_virtual)        return false;
+    if (flags.noIp     && d.ip_address)         return false;
+    if (flags.noVendor && d.vendor)             return false;
     if (!q) return true;
     return (
       (d.ip_address  || '').includes(q) ||
@@ -398,6 +425,19 @@ function applyFilter() {
   });
 
   renderDevices(filtered);
+}
+
+function toggleFilterPanel() {
+  const panel = el('filter-panel');
+  panel.classList.toggle('hidden');
+}
+
+function clearFlags() {
+  ['f-switch','f-wireless','f-ap','f-virtual','f-no-ip','f-no-vendor'].forEach(id => {
+    const cb = el(id);
+    if (cb) cb.checked = false;
+  });
+  applyFilter();
 }
 
 function renderDevices(devices) {
