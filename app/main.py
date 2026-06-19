@@ -198,20 +198,25 @@ def _lookup_vendor(mac: str) -> str | None:
 
 
 def _fill_missing_vendors() -> None:
-    """Background task: look up vendor via macvendors.com for devices that have a MAC but no vendor."""
+    """Look up vendor via macvendors.com for devices that have a MAC and haven't been looked up yet."""
     with get_db() as db:
         devices = db.execute(
-            sa.select(Device).where(Device.mac_address.isnot(None), Device.vendor.is_(None))
+            sa.select(Device).where(
+                Device.mac_address.isnot(None),
+                Device.vendor_looked_up.is_(False),
+            )
         ).scalars().all()
         ids_macs = [(d.id, d.mac_address) for d in devices]
 
     for device_id, mac in ids_macs:
         vendor = _lookup_vendor(mac)
-        if vendor:
-            with get_db() as db:
-                d = db.get(Device, device_id)
-                if d and not d.vendor:
+        with get_db() as db:
+            d = db.get(Device, device_id)
+            if d:
+                if vendor:
                     d.vendor = vendor
+                d.vendor_looked_up = True
+        if vendor:
             logger.info("Vendor lookup: device %d (%s) → %s", device_id, mac, vendor)
         time.sleep(0.6)  # stay under macvendors.com free-tier rate limit (2 req/s)
 
@@ -368,8 +373,6 @@ def _run_scan() -> None:
                 target=lambda: _send_new_device_email(new_devices),
                 daemon=True, name="email-notify",
             ).start()
-
-        threading.Thread(target=_fill_missing_vendors, daemon=True, name="vendor-lookup").start()
 
         if ip_changes:
             if notify_ip.lower() == "true":
@@ -616,9 +619,17 @@ def api_vendor_lookup(device_id: int):
         vendor = _lookup_vendor(d.mac_address)
         if vendor:
             d.vendor = vendor
+        d.vendor_looked_up = True
         db.flush()
         rooms = _rooms_dict(db)
         return _device_to_dict(d, _device_ports(db, device_id), rooms, _device_wlans(db, device_id))
+
+
+@app.post("/api/vendor-lookup-all", status_code=202)
+def api_vendor_lookup_all():
+    """Trigger a background vendor lookup for all devices not yet looked up."""
+    threading.Thread(target=_fill_missing_vendors, daemon=True, name="vendor-lookup-all").start()
+    return {"status": "started"}
 
 
 # ── device ports (interfaces) ─────────────────────────────────────────────────

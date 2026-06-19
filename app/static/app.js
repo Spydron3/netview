@@ -153,6 +153,24 @@ async function sendTestEmail() {
   }
 }
 
+async function runVendorLookupAll() {
+  const btn = el('vendor-lookup-btn');
+  const msg = el('vendor-lookup-msg');
+  btn.disabled = true;
+  msg.textContent = 'Running…';
+  msg.style.color = '';
+  try {
+    await apiFetch('/api/vendor-lookup-all', { method: 'POST' });
+    msg.textContent = 'Started — results will appear after the next page refresh.';
+    msg.style.color = 'var(--green)';
+  } catch (e) {
+    msg.textContent = e.message || 'Failed.';
+    msg.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function showSettingsMsg(text, error = false) {
   const msg = el('settings-msg');
   msg.textContent = text;

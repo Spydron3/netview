@@ -170,6 +170,7 @@
       <div class="settings-tabs">
         <button class="settings-tab active" data-tab="scanning" onclick="switchSettingsTab('scanning')">Scanning</button>
         <button class="settings-tab" data-tab="notifications" onclick="switchSettingsTab('notifications')">Notifications</button>
+        <button class="settings-tab" data-tab="devices" onclick="switchSettingsTab('devices')">Devices</button>
         <button class="settings-tab" data-tab="log" onclick="switchSettingsTab('log')">Log</button>
       </div>
       <div class="settings-tab-content" data-tab="scanning">
@@ -249,6 +250,14 @@
             <button class="btn btn-sm btn-ghost" onclick="sendTestEmail()">Test email</button>
             <span id="s-test-msg" class="settings-msg" style="margin-left:8px"></span>
           </div>
+        </div>
+      </div>
+      <div class="settings-tab-content hidden" data-tab="devices">
+        <div class="setting-row">
+          <label>Vendor lookup</label>
+          <button class="btn btn-sm btn-ghost" id="vendor-lookup-btn" onclick="runVendorLookupAll()">Check all vendors</button>
+          <p class="setting-hint">Query macvendors.com for devices that have a MAC address but no vendor identified yet. Runs in the background.</p>
+          <span id="vendor-lookup-msg" class="settings-msg"></span>
         </div>
       </div>
       <div class="settings-tab-content hidden log-tab-content" data-tab="log">

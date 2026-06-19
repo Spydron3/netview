@@ -30,9 +30,10 @@ class Device(Base):
     is_switch   = Column(Boolean, default=False, nullable=False, server_default="false")
     is_virtual  = Column(Boolean, default=False, nullable=False, server_default="false")
     parent_id   = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True)
-    is_wireless     = Column(Boolean, default=False, nullable=False, server_default="false")
-    is_access_point = Column(Boolean, default=False, nullable=False, server_default="false")
-    room_id         = Column(Integer, ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)
+    is_wireless      = Column(Boolean, default=False, nullable=False, server_default="false")
+    is_access_point  = Column(Boolean, default=False, nullable=False, server_default="false")
+    room_id          = Column(Integer, ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)
+    vendor_looked_up = Column(Boolean, default=False, nullable=False, server_default="false")
 
 
 class Setting(Base):

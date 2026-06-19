@@ -259,6 +259,10 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                     "ALTER TABLE devices ADD COLUMN IF NOT EXISTS "
                     "is_access_point BOOLEAN NOT NULL DEFAULT FALSE"
                 ))
+                conn.execute(text(
+                    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS "
+                    "vendor_looked_up BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
                 # seed default settings from env vars on first run
                 defaults = {
                     "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),
