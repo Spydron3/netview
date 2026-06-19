@@ -36,6 +36,15 @@ class Device(Base):
     vendor_looked_up = Column(Boolean, default=False, nullable=False, server_default="false")
 
 
+class DeviceMAC(Base):
+    __tablename__ = "device_macs"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    device_id   = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
+    mac_address = Column(String(17), nullable=False, unique=True)
+    type        = Column(String(8), nullable=False, default="wired")  # 'wired' | 'wireless'
+
+
 class Setting(Base):
     __tablename__ = "settings"
 

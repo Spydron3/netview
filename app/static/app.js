@@ -259,6 +259,7 @@ function applyFilter() {
       (d.ip_address  || '').includes(q) ||
       (d.name        || '').toLowerCase().includes(q) ||
       (d.hostname    || '').toLowerCase().includes(q) ||
+      (d.macs || []).some(m => m.mac_address.toLowerCase().includes(q)) ||
       (d.mac_address || '').toLowerCase().includes(q) ||
       (d.vendor      || '').toLowerCase().includes(q) ||
       (d.room        || '').toLowerCase().includes(q)
@@ -295,9 +296,17 @@ function renderDevices(devices) {
         ${d.vendor
           ? `<span class="device-vendor">${esc(d.vendor)}</span>`
           : `<span class="device-vendor-placeholder">+ Add vendor</span>`}
-        ${!d.vendor && d.mac_address ? `<button class="btn-vendor-lookup" onclick="event.stopPropagation(); lookupVendor(${d.id})" title="Look up via macvendors.com">Lookup</button>` : ''}
+        ${!d.vendor && (d.mac_address || (d.macs || []).length) ? `<button class="btn-vendor-lookup" onclick="event.stopPropagation(); lookupVendor(${d.id})" title="Look up via macvendors.com">Lookup</button>` : ''}
       </div>
-      ${d.mac_address ? `<div class="device-mac">${esc(d.mac_address)}</div>` : ''}
+      <div class="device-macs">
+        ${(d.macs || []).map(m => `
+          <div class="device-mac-row">
+            <span class="mac-type-badge mac-type-${m.type}" onclick="toggleMacType(${d.id}, ${m.id}, '${m.type}')" title="Click to toggle wired/wireless">${m.type === 'wireless' ? '📶' : '🔌'}</span>
+            <span class="device-mac">${esc(m.mac_address)}</span>
+            <button class="btn-mac-delete" onclick="deleteMac(${d.id}, ${m.id})" title="Remove MAC">✕</button>
+          </div>`).join('')}
+        <button class="btn-mac-add" onclick="showAddMac(${d.id}, this)">+ MAC</button>
+      </div>
       ${(() => {
         const prev = (d.ip_history || []).filter(h => h.ip_address !== d.ip_address);
         return prev.length ? `<details class="ip-history">
@@ -703,6 +712,86 @@ function startEditName(deviceId, row) {
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter')  { input.blur(); }
     if (e.key === 'Escape') { saved = true; applyFilter(); }
+  });
+}
+
+async function toggleMacType(deviceId, macId, currentType) {
+  const newType = currentType === 'wired' ? 'wireless' : 'wired';
+  try {
+    await apiFetch(`/api/devices/${deviceId}/macs/${macId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: newType }),
+    });
+    const idx = allDevices.findIndex(d => d.id === deviceId);
+    if (idx >= 0) {
+      const m = allDevices[idx].macs.find(m => m.id === macId);
+      if (m) m.type = newType;
+    }
+    applyFilter();
+  } catch (e) {
+    console.error('Failed to update MAC type:', e);
+  }
+}
+
+async function deleteMac(deviceId, macId) {
+  try {
+    await apiFetch(`/api/devices/${deviceId}/macs/${macId}`, { method: 'DELETE' });
+    const idx = allDevices.findIndex(d => d.id === deviceId);
+    if (idx >= 0) allDevices[idx].macs = allDevices[idx].macs.filter(m => m.id !== macId);
+    applyFilter();
+  } catch (e) {
+    console.error('Failed to delete MAC:', e);
+  }
+}
+
+function showAddMac(deviceId, btn) {
+  const container = btn.closest('.device-macs');
+  if (container.querySelector('.mac-add-form')) return;
+  btn.style.display = 'none';
+
+  const form = document.createElement('div');
+  form.className = 'mac-add-form';
+  form.innerHTML = `
+    <input class="mac-add-input" placeholder="aa:bb:cc:dd:ee:ff" maxlength="17" />
+    <select class="mac-type-select">
+      <option value="wired">Wired</option>
+      <option value="wireless">Wireless</option>
+    </select>
+    <button class="btn-mac-confirm">Add</button>
+    <button class="btn-mac-cancel">✕</button>`;
+  container.appendChild(form);
+
+  const input = form.querySelector('.mac-add-input');
+  const typeSelect = form.querySelector('.mac-type-select');
+  input.focus();
+
+  form.querySelector('.btn-mac-cancel').onclick = () => {
+    form.remove();
+    btn.style.display = '';
+  };
+
+  form.querySelector('.btn-mac-confirm').onclick = async () => {
+    const mac = input.value.trim();
+    if (!mac) return;
+    try {
+      const created = await apiFetch(`/api/devices/${deviceId}/macs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mac_address: mac, type: typeSelect.value }),
+      });
+      const idx = allDevices.findIndex(d => d.id === deviceId);
+      if (idx >= 0) allDevices[idx].macs.push(created);
+      applyFilter();
+    } catch (e) {
+      input.style.borderColor = 'var(--red)';
+      input.title = e.message || 'Failed';
+    }
+  };
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') form.querySelector('.btn-mac-confirm').click();
+    if (e.key === 'Escape') form.querySelector('.btn-mac-cancel').click();
   });
 }
 

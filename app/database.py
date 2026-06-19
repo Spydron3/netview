@@ -263,6 +263,14 @@ def init_db(retries: int = 30, delay: float = 2.0) -> None:
                     "ALTER TABLE devices ADD COLUMN IF NOT EXISTS "
                     "vendor_looked_up BOOLEAN NOT NULL DEFAULT FALSE"
                 ))
+                # device_macs table is created by create_all; seed from devices.mac_address
+                conn.execute(text("""
+                    INSERT INTO device_macs (device_id, mac_address, type)
+                    SELECT id, mac_address, 'wired'
+                    FROM devices
+                    WHERE mac_address IS NOT NULL
+                    ON CONFLICT (mac_address) DO NOTHING
+                """))
                 # seed default settings from env vars on first run
                 defaults = {
                     "scan_interval": os.environ.get("SCAN_INTERVAL", "300"),

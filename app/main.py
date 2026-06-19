@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from database import get_db, get_setting, init_db, set_setting
 from sqlalchemy.orm import aliased as _aliased
-from models import Device, DeviceIPHistory, DevicePort, Notification, PortLink, Room, ScanRun, Setting, SwitchPort, TopologyPosition, Wlan
+from models import Device, DeviceIPHistory, DeviceMAC, DevicePort, Notification, PortLink, Room, ScanRun, Setting, SwitchPort, TopologyPosition, Wlan
 from scanner import get_network_range, scan_network
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -311,6 +311,7 @@ def _run_scan() -> None:
                     existing.open_ports = d["open_ports"]
                     if mac:
                         existing.mac_address = mac
+                        _upsert_device_mac(db, existing.id, mac, "wired")
                     if d["hostname"]:
                         existing.hostname = d["hostname"]
                     if d["vendor"]:
@@ -330,6 +331,8 @@ def _run_scan() -> None:
                     )
                     db.add(new_dev)
                     db.flush()
+                    if mac:
+                        _upsert_device_mac(db, new_dev.id, mac, "wired")
                     new_devices.append(d)
 
             online = len([d for d in devices if d["is_online"]])
@@ -479,6 +482,24 @@ def api_stats():
 
 # ── devices ───────────────────────────────────────────────────────────────────
 
+def _upsert_device_mac(db, device_id: int, mac: str, type_: str) -> None:
+    """Insert MAC into device_macs if not already present; never overrides existing type."""
+    existing = db.execute(
+        sa.select(DeviceMAC).where(DeviceMAC.mac_address == mac)
+    ).scalar_one_or_none()
+    if not existing:
+        db.add(DeviceMAC(device_id=device_id, mac_address=mac, type=type_))
+        db.flush()
+
+
+def _device_macs(db, device_id: int) -> list:
+    return db.execute(
+        sa.select(DeviceMAC)
+        .where(DeviceMAC.device_id == device_id)
+        .order_by(DeviceMAC.id)
+    ).scalars().all()
+
+
 def _device_wlans(db, device_id: int) -> list:
     return db.execute(
         sa.select(Wlan).where(Wlan.device_id == device_id).order_by(Wlan.band, Wlan.ssid)
@@ -538,8 +559,14 @@ def api_devices():
             bucket = hist_by_device.setdefault(h.device_id, [])
             if len(bucket) < 5:
                 bucket.append(h)
+        mac_rows = db.execute(
+            sa.select(DeviceMAC).order_by(DeviceMAC.device_id, DeviceMAC.id)
+        ).scalars().all()
+        macs_by_device: dict[int, list] = {}
+        for m in mac_rows:
+            macs_by_device.setdefault(m.device_id, []).append(m)
         rooms = _rooms_dict(db)
-        return [_device_to_dict(dev, conns.get(dev.id, []), rooms, wlans_by_device.get(dev.id, []), hist_by_device.get(dev.id, [])) for dev in devices]
+        return [_device_to_dict(dev, conns.get(dev.id, []), rooms, wlans_by_device.get(dev.id, []), hist_by_device.get(dev.id, []), macs_by_device.get(dev.id, [])) for dev in devices]
 
 
 @app.get("/api/devices/{device_id}")
@@ -548,7 +575,7 @@ def api_device(device_id: int):
         dev = db.get(Device, device_id)
         if not dev:
             raise HTTPException(status_code=404, detail="Device not found")
-        return _device_to_dict(dev, _device_ports(db, device_id), _rooms_dict(db), _device_wlans(db, device_id))
+        return _device_to_dict(dev, _device_ports(db, device_id), _rooms_dict(db), _device_wlans(db, device_id), macs=_device_macs(db, device_id))
 
 
 @app.delete("/api/devices/{device_id}", status_code=204)
@@ -607,7 +634,7 @@ def api_update_device(device_id: int, body: DeviceUpdate):
             d.room_id = body.room_id
         db.flush()
         rooms = _rooms_dict(db)
-        return _device_to_dict(d, _device_ports(db, device_id), rooms, _device_wlans(db, device_id))
+        return _device_to_dict(d, _device_ports(db, device_id), rooms, _device_wlans(db, device_id), macs=_device_macs(db, device_id))
 
 
 @app.post("/api/devices/{device_id}/vendor-lookup")
@@ -624,7 +651,7 @@ def api_vendor_lookup(device_id: int):
         d.vendor_looked_up = True
         db.flush()
         rooms = _rooms_dict(db)
-        return _device_to_dict(d, _device_ports(db, device_id), rooms, _device_wlans(db, device_id))
+        return _device_to_dict(d, _device_ports(db, device_id), rooms, _device_wlans(db, device_id), macs=_device_macs(db, device_id))
 
 
 @app.post("/api/vendor-lookup-all", status_code=202)
@@ -632,6 +659,70 @@ def api_vendor_lookup_all():
     """Trigger a background vendor lookup for all devices not yet looked up."""
     threading.Thread(target=_fill_missing_vendors, daemon=True, name="vendor-lookup-all").start()
     return {"status": "started"}
+
+
+# ── device MACs ───────────────────────────────────────────────────────────────
+
+class DeviceMACCreate(BaseModel):
+    mac_address: str
+    type: str = "wired"  # 'wired' | 'wireless'
+
+
+class DeviceMACUpdate(BaseModel):
+    type: str
+
+
+@app.get("/api/devices/{device_id}/macs")
+def api_list_device_macs(device_id: int):
+    with get_db() as db:
+        if not db.get(Device, device_id):
+            raise HTTPException(status_code=404, detail="Device not found")
+        return [{"id": m.id, "mac_address": m.mac_address, "type": m.type}
+                for m in _device_macs(db, device_id)]
+
+
+@app.post("/api/devices/{device_id}/macs", status_code=201)
+def api_add_device_mac(device_id: int, body: DeviceMACCreate):
+    if body.type not in ("wired", "wireless"):
+        raise HTTPException(status_code=422, detail="type must be 'wired' or 'wireless'")
+    mac = _norm_mac(body.mac_address)
+    if not mac:
+        raise HTTPException(status_code=422, detail="Invalid MAC address")
+    with get_db() as db:
+        if not db.get(Device, device_id):
+            raise HTTPException(status_code=404, detail="Device not found")
+        conflict = db.execute(
+            sa.select(DeviceMAC).where(DeviceMAC.mac_address == mac)
+        ).scalar_one_or_none()
+        if conflict:
+            if conflict.device_id == device_id:
+                raise HTTPException(status_code=409, detail="MAC already on this device")
+            raise HTTPException(status_code=409, detail="MAC belongs to another device")
+        dm = DeviceMAC(device_id=device_id, mac_address=mac, type=body.type)
+        db.add(dm)
+        db.flush()
+        return {"id": dm.id, "mac_address": dm.mac_address, "type": dm.type}
+
+
+@app.patch("/api/devices/{device_id}/macs/{mac_id}")
+def api_update_device_mac(device_id: int, mac_id: int, body: DeviceMACUpdate):
+    if body.type not in ("wired", "wireless"):
+        raise HTTPException(status_code=422, detail="type must be 'wired' or 'wireless'")
+    with get_db() as db:
+        dm = db.get(DeviceMAC, mac_id)
+        if not dm or dm.device_id != device_id:
+            raise HTTPException(status_code=404, detail="MAC not found")
+        dm.type = body.type
+        return {"id": dm.id, "mac_address": dm.mac_address, "type": dm.type}
+
+
+@app.delete("/api/devices/{device_id}/macs/{mac_id}", status_code=204)
+def api_delete_device_mac(device_id: int, mac_id: int):
+    with get_db() as db:
+        dm = db.get(DeviceMAC, mac_id)
+        if not dm or dm.device_id != device_id:
+            raise HTTPException(status_code=404, detail="MAC not found")
+        db.delete(dm)
 
 
 # ── device ports (interfaces) ─────────────────────────────────────────────────
@@ -698,7 +789,7 @@ def api_connect_device_port(device_id: int, body: DeviceConnectionCreate):
             raise HTTPException(status_code=409, detail="Device interface already connected")
         db.add(PortLink(port_a_id=body.switch_port_id, dev_port_id=body.dev_port_id))
         db.flush()
-        return _device_to_dict(db.get(Device, device_id), _device_ports(db, device_id), _rooms_dict(db), _device_wlans(db, device_id))
+        return _device_to_dict(db.get(Device, device_id), _device_ports(db, device_id), _rooms_dict(db), _device_wlans(db, device_id), macs=_device_macs(db, device_id))
 
 
 @app.delete("/api/devices/{device_id}/ports/{port_id}", status_code=204)
@@ -1712,7 +1803,7 @@ def _rooms_dict(db) -> dict[int, str]:
     return {r.id: r.name for r in db.execute(sa.select(Room)).scalars().all()}
 
 
-def _device_to_dict(d: Device, ports: list | None = None, rooms: dict | None = None, wlans: list | None = None, ip_history: list | None = None) -> dict:
+def _device_to_dict(d: Device, ports: list | None = None, rooms: dict | None = None, wlans: list | None = None, ip_history: list | None = None, macs: list | None = None) -> dict:
     return {
         "id": d.id,
         "ip_address": d.ip_address,
@@ -1753,6 +1844,10 @@ def _device_to_dict(d: Device, ports: list | None = None, rooms: dict | None = N
         "ip_history": [
             {"ip_address": h.ip_address, "changed_at": h.changed_at.isoformat()}
             for h in (ip_history or [])
+        ],
+        "macs": [
+            {"id": m.id, "mac_address": m.mac_address, "type": m.type}
+            for m in (macs or [])
         ],
     }
 

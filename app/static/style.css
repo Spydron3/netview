@@ -305,11 +305,31 @@ main {
   white-space: nowrap;
 }
 .btn-vendor-lookup:hover { border-color: var(--blue); color: var(--blue); }
+.device-macs { display: flex; flex-direction: column; gap: 2px; }
+.device-mac-row { display: flex; align-items: center; gap: 4px; }
+.mac-type-badge { font-size: 11px; cursor: pointer; user-select: none; line-height: 1; }
 .device-mac {
   font-family: ui-monospace, monospace;
   font-size: 11px;
   color: var(--muted);
 }
+.btn-mac-delete {
+  font-size: 9px; padding: 0 3px; border-radius: 3px; border: none;
+  background: none; color: var(--muted); cursor: pointer; opacity: 0; line-height: 1.6;
+}
+.device-mac-row:hover .btn-mac-delete { opacity: 1; }
+.btn-mac-delete:hover { color: var(--red); }
+.btn-mac-add {
+  font-size: 10px; padding: 1px 5px; border-radius: 4px; border: 1px dashed var(--border);
+  background: none; color: var(--muted); cursor: pointer; opacity: 0; align-self: flex-start; margin-top: 2px;
+}
+.device-card:hover .btn-mac-add { opacity: 0.7; }
+.btn-mac-add:hover { opacity: 1 !important; border-color: var(--blue); color: var(--blue); }
+.mac-add-form { display: flex; align-items: center; gap: 4px; margin-top: 2px; flex-wrap: wrap; }
+.mac-add-input { font-family: ui-monospace, monospace; font-size: 11px; width: 130px; padding: 2px 5px; }
+.mac-type-select { font-size: 11px; padding: 2px 4px; }
+.btn-mac-confirm { font-size: 10px; padding: 2px 6px; }
+.btn-mac-cancel { font-size: 10px; padding: 2px 5px; background: none; border: none; color: var(--muted); cursor: pointer; }
 
 .ip-history {
   font-size: 11px;
