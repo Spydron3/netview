@@ -389,6 +389,7 @@ main {
   justify-content: space-between;
   gap: 8px;
 }
+.device-footer-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .device-delete-btn {
   background: none;
   border: none;

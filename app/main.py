@@ -24,7 +24,7 @@ from scanner import get_network_range, scan_network
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_VERSION = 25
+APP_VERSION = 26
 
 _scan_lock  = threading.Lock()
 _scan_state: dict = {"running": False, "started_at": None}
