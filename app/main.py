@@ -581,6 +581,8 @@ def api_update_device(device_id: int, body: DeviceUpdate):
             d.name = body.name.strip() if body.name and body.name.strip() else None
         if "vendor" in body.model_fields_set:
             d.vendor = body.vendor.strip() if body.vendor and body.vendor.strip() else None
+            if not d.vendor:
+                d.vendor_looked_up = False
         if "is_switch" in body.model_fields_set:
             d.is_switch = bool(body.is_switch)
         if "is_virtual" in body.model_fields_set:
