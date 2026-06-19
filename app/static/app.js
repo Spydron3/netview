@@ -107,6 +107,38 @@ function closeSettings() {
   el('settings-modal').classList.add('hidden');
 }
 
+async function openDuplicates() {
+  el('duplicates-modal').classList.remove('hidden');
+  const body = el('duplicates-body');
+  body.textContent = 'Loading…';
+  try {
+    const groups = await apiFetch('/api/devices/duplicates');
+    if (!groups.length) {
+      body.innerHTML = '<p style="color:var(--muted);padding:8px 0">No duplicate MAC addresses found.</p>';
+      return;
+    }
+    body.innerHTML = groups.map(g => `
+      <div class="dup-group">
+        <div class="dup-mac">${esc(g.mac_address)}</div>
+        <div class="dup-devices">
+          ${g.devices.map(d => `
+            <div class="dup-device">
+              <span class="status-dot ${d.is_online ? 'online' : 'offline'}" style="width:7px;height:7px;flex-shrink:0"></span>
+              <span class="dup-device-label">${esc(d.name || d.hostname || d.ip_address || 'Device ' + d.id)}</span>
+              ${d.ip_address ? `<span class="dup-device-ip">${esc(d.ip_address)}</span>` : ''}
+              ${d.room ? `<span class="dup-device-room">${esc(d.room)}</span>` : ''}
+            </div>`).join('')}
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    body.innerHTML = `<p style="color:var(--red)">${esc(e.message || 'Failed to load duplicates.')}</p>`;
+  }
+}
+
+function closeDuplicates() {
+  el('duplicates-modal').classList.add('hidden');
+}
+
 async function saveSettings() {
   const minutes = parseInt(el('s-interval').value);
   if (!minutes || minutes < 1) {

@@ -528,6 +528,53 @@ def _device_ports(db, device_id: int) -> list:
     ).all()
 
 
+@app.get("/api/devices/duplicates")
+def api_device_duplicates():
+    """Return groups of devices that share the same MAC address."""
+    with get_db() as db:
+        # Collect all (device_id, mac) from device_macs
+        mac_rows = db.execute(sa.select(DeviceMAC)).scalars().all()
+        # Also cover devices.mac_address not yet in device_macs
+        dev_rows = db.execute(
+            sa.select(Device).where(Device.mac_address.isnot(None))
+        ).scalars().all()
+
+        mac_to_ids: dict[str, set[int]] = {}
+        for m in mac_rows:
+            mac_to_ids.setdefault(m.mac_address, set()).add(m.device_id)
+        for d in dev_rows:
+            mac_to_ids.setdefault(d.mac_address, set()).add(d.id)
+
+        dup_macs = {mac: ids for mac, ids in mac_to_ids.items() if len(ids) > 1}
+        if not dup_macs:
+            return []
+
+        all_ids = {did for ids in dup_macs.values() for did in ids}
+        devices = {d.id: d for d in db.execute(
+            sa.select(Device).where(Device.id.in_(all_ids))
+        ).scalars().all()}
+        rooms = _rooms_dict(db)
+
+        return [
+            {
+                "mac_address": mac,
+                "devices": [
+                    {
+                        "id": devices[did].id,
+                        "name": devices[did].name,
+                        "hostname": devices[did].hostname,
+                        "ip_address": devices[did].ip_address,
+                        "vendor": devices[did].vendor,
+                        "is_online": devices[did].is_online,
+                        "room": rooms.get(devices[did].room_id),
+                    }
+                    for did in sorted(ids) if did in devices
+                ],
+            }
+            for mac, ids in sorted(dup_macs.items())
+        ]
+
+
 @app.get("/api/devices")
 def api_devices():
     with get_db() as db:

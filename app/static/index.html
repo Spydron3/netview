@@ -84,6 +84,7 @@
         <input id="show-offline" type="checkbox" onchange="applyFilter()" />
         Show offline
       </label>
+      <button class="btn btn-sm btn-ghost" onclick="openDuplicates()">Show duplicates</button>
     </div>
 
     <div id="device-grid" class="device-grid">
@@ -157,6 +158,18 @@
   </div>
 
 </main>
+
+<!-- ── duplicates modal ── -->
+<div id="duplicates-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-backdrop" onclick="closeDuplicates()"></div>
+  <div class="modal-panel">
+    <div class="modal-header">
+      <h2>Duplicate MACs</h2>
+      <button class="modal-close" onclick="closeDuplicates()">✕</button>
+    </div>
+    <div class="modal-body" id="duplicates-body">Loading…</div>
+  </div>
+</div>
 
 <!-- ── settings modal ── -->
 <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true">
