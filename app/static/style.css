@@ -199,6 +199,11 @@ main {
   font-size: 13px; cursor: pointer; white-space: nowrap;
 }
 .filter-row input { cursor: pointer; }
+.filter-row-room { cursor: default; }
+.filter-row-room select {
+  background: var(--surface2); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 4px; font-size: 12px; padding: 2px 4px; cursor: pointer;
+}
 .filter-clear {
   margin-top: 4px; padding: 4px 0; background: none; border: none;
   font-size: 11px; color: var(--muted); cursor: pointer; text-align: left;

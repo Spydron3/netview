@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NetViewMyHome</title>
   <link rel="icon" type="image/svg+xml" href="/static/logo-icon.svg" />
-  <link rel="stylesheet" href="/static/style.css?v=28" />
+  <link rel="stylesheet" href="/static/style.css?v=29" />
 </head>
 <body>
 
@@ -95,6 +95,9 @@
           <label class="filter-row"><input type="checkbox" id="f-virtual"   onchange="applyFilter()" /> Virtual</label>
           <label class="filter-row"><input type="checkbox" id="f-no-ip"     onchange="applyFilter()" /> No IP</label>
           <label class="filter-row"><input type="checkbox" id="f-no-vendor" onchange="applyFilter()" /> No vendor</label>
+          <label class="filter-row filter-row-room">Room
+            <select id="f-room" onchange="applyFilter()"><option value="">All</option></select>
+          </label>
           <button class="filter-clear" onclick="clearFlags()">Clear all</button>
         </div>
       </div>
@@ -498,6 +501,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
-<script src="/static/app.js?v=28"></script>
+<script src="/static/app.js?v=29"></script>
 </body>
 </html>

@@ -356,6 +356,13 @@ async function loadAllPorts() {
 async function loadRooms() {
   try {
     allRooms = await apiFetch('/api/rooms');
+    const sel = el('f-room');
+    if (sel) {
+      const prev = sel.value;
+      sel.innerHTML = '<option value="">All</option>' +
+        allRooms.map(r => `<option value="${r.id}">${esc(r.name)}</option>`).join('');
+      if (prev) sel.value = prev;
+    }
   } catch (e) {
     console.error('loadRooms:', e);
   }
@@ -395,7 +402,8 @@ function applyFilter() {
     noIp:     el('f-no-ip')?.checked,
     noVendor: el('f-no-vendor')?.checked,
   };
-  const activeFlags = Object.values(flags).filter(Boolean).length;
+  const roomFilter = el('f-room')?.value || '';
+  const activeFlags = Object.values(flags).filter(Boolean).length + (roomFilter ? 1 : 0);
   const badge = el('filter-badge');
   if (badge) {
     badge.textContent = activeFlags;
@@ -412,6 +420,7 @@ function applyFilter() {
     if (flags.virtual  && !d.is_virtual)        return false;
     if (flags.noIp     && d.ip_address)         return false;
     if (flags.noVendor && d.vendor)             return false;
+    if (roomFilter && String(d.room_id) !== roomFilter) return false;
     if (!q) return true;
     return (
       (d.ip_address  || '').includes(q) ||
@@ -437,6 +446,8 @@ function clearFlags() {
     const cb = el(id);
     if (cb) cb.checked = false;
   });
+  const roomSel = el('f-room');
+  if (roomSel) roomSel.value = '';
   applyFilter();
 }
 
