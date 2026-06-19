@@ -187,6 +187,7 @@ main {
   border-radius: 8px; background: var(--blue); color: #fff;
   font-size: 10px; font-weight: 600; margin-left: 4px;
 }
+.filter-panel.hidden { display: none; }
 .filter-panel {
   position: absolute; top: calc(100% + 6px); left: 0; z-index: 50;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
