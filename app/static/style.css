@@ -528,6 +528,26 @@ tr:hover td { background: var(--surface2); }
 
 #smtp-fields { display: none; }
 
+/* ── merge modal ── */
+.merge-candidate {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border-radius: 6px; cursor: pointer; border: 1px solid var(--border);
+  background: var(--surface);
+}
+.merge-candidate:hover { border-color: var(--blue); background: color-mix(in srgb, var(--blue) 8%, var(--surface)); }
+.merge-candidate-label { font-size: 13px; font-weight: 500; }
+.merge-candidate-sub { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.device-merge-btn {
+  background: none; border: none; font-size: 11px; color: var(--muted);
+  cursor: pointer; padding: 0; opacity: 0.5;
+}
+.device-merge-btn:hover { color: var(--blue); opacity: 1; }
+.btn-dup-merge {
+  margin-left: auto; font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--surface2); color: var(--muted); cursor: pointer;
+}
+.btn-dup-merge:hover { border-color: var(--blue); color: var(--blue); }
+
 /* ── duplicates modal ── */
 .dup-group { border-bottom: 1px solid var(--border); padding: 10px 0; }
 .dup-group:last-child { border-bottom: none; }

@@ -109,6 +109,10 @@ function closeSettings() {
 
 async function openDuplicates() {
   el('duplicates-modal').classList.remove('hidden');
+  await renderDuplicates();
+}
+
+async function renderDuplicates() {
   const body = el('duplicates-body');
   body.textContent = 'Loading…';
   try {
@@ -122,21 +126,116 @@ async function openDuplicates() {
         <div class="dup-mac">${esc(g.mac_address)}</div>
         <div class="dup-devices">
           ${g.devices.map(d => `
-            <div class="dup-device">
+            <div class="dup-device" data-id="${d.id}">
               <span class="status-dot ${d.is_online ? 'online' : 'offline'}" style="width:7px;height:7px;flex-shrink:0"></span>
               <span class="dup-device-label">${esc(d.name || d.hostname || d.ip_address || 'Device ' + d.id)}</span>
               ${d.ip_address ? `<span class="dup-device-ip">${esc(d.ip_address)}</span>` : ''}
               ${d.room ? `<span class="dup-device-room">${esc(d.room)}</span>` : ''}
+              <button class="btn-dup-merge" data-target="${d.id}" data-group='${JSON.stringify(g.devices.map(x => x.id))}'>Keep this</button>
             </div>`).join('')}
         </div>
       </div>`).join('');
+    body.querySelectorAll('.btn-dup-merge').forEach(btn => {
+      btn.addEventListener('click', () => mergeIntoDevice(
+        parseInt(btn.dataset.target),
+        JSON.parse(btn.dataset.group).filter(id => id !== parseInt(btn.dataset.target))
+      ));
+    });
   } catch (e) {
     body.innerHTML = `<p style="color:var(--red)">${esc(e.message || 'Failed to load duplicates.')}</p>`;
   }
 }
 
+async function mergeIntoDevice(targetId, sourceIds) {
+  const target = allDevices.find(d => d.id === targetId);
+  const sources = sourceIds.map(id => allDevices.find(d => d.id === id)).filter(Boolean);
+  const targetLabel = target ? (target.name || target.hostname || target.ip_address || 'Device ' + targetId) : 'Device ' + targetId;
+  const sourceLabels = sources.map(d => d.name || d.hostname || d.ip_address || 'Device ' + d.id).join(', ');
+  if (!confirm(`Merge ${sourceLabels} into ${targetLabel}?\n\nThe other device(s) will be deleted and their MACs, history, and connections moved to ${targetLabel}.`)) return;
+  try {
+    for (const sourceId of sourceIds) {
+      const updated = await apiFetch(`/api/devices/${targetId}/merge/${sourceId}`, { method: 'POST' });
+      const tidx = allDevices.findIndex(d => d.id === targetId);
+      if (tidx >= 0) allDevices[tidx] = updated;
+      const sidx = allDevices.findIndex(d => d.id === sourceId);
+      if (sidx >= 0) allDevices.splice(sidx, 1);
+    }
+    applyFilter();
+    await renderDuplicates();
+  } catch (e) {
+    alert('Merge failed: ' + (e.message || 'Unknown error'));
+  }
+}
+
 function closeDuplicates() {
   el('duplicates-modal').classList.add('hidden');
+}
+
+let _mergeSourceId = null;
+
+function openMergeModal(sourceId) {
+  _mergeSourceId = sourceId;
+  const src = allDevices.find(d => d.id === sourceId);
+  el('merge-source-label').textContent = 'Merging: ' + (src ? (src.name || src.hostname || src.ip_address || 'Device ' + sourceId) : 'Device ' + sourceId);
+  el('merge-search').value = '';
+  el('merge-error').style.display = 'none';
+  renderMergeList();
+  el('merge-modal').classList.remove('hidden');
+}
+
+function closeMergeModal() {
+  el('merge-modal').classList.add('hidden');
+  _mergeSourceId = null;
+}
+
+function renderMergeList() {
+  const q = el('merge-search').value.trim().toLowerCase();
+  const list = el('merge-list');
+  const candidates = allDevices.filter(d => {
+    if (d.id === _mergeSourceId) return false;
+    if (!q) return true;
+    return (d.name || '').toLowerCase().includes(q) ||
+           (d.hostname || '').toLowerCase().includes(q) ||
+           (d.ip_address || '').toLowerCase().includes(q) ||
+           (d.macs || []).some(m => m.mac_address.toLowerCase().includes(q));
+  });
+  if (!candidates.length) {
+    list.innerHTML = '<p style="color:var(--muted);font-size:13px;padding:8px 0">No devices found.</p>';
+    return;
+  }
+  list.innerHTML = candidates.map(d => {
+    const label = d.name || d.hostname || d.ip_address || 'Device ' + d.id;
+    const sub = [d.ip_address, (d.macs || []).map(m => m.mac_address).join(', ')].filter(Boolean).join(' · ');
+    return `<div class="merge-candidate" onclick="confirmMerge(${d.id})">
+      <span class="status-dot ${d.is_online ? 'online' : 'offline'}" style="width:7px;height:7px;flex-shrink:0"></span>
+      <div style="min-width:0">
+        <div class="merge-candidate-label">${esc(label)}</div>
+        ${sub ? `<div class="merge-candidate-sub">${esc(sub)}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function confirmMerge(targetId) {
+  const src = allDevices.find(d => d.id === _mergeSourceId);
+  const tgt = allDevices.find(d => d.id === targetId);
+  const srcLabel = src ? (src.name || src.hostname || src.ip_address || 'Device ' + _mergeSourceId) : 'Device ' + _mergeSourceId;
+  const tgtLabel = tgt ? (tgt.name || tgt.hostname || tgt.ip_address || 'Device ' + targetId) : 'Device ' + targetId;
+  if (!confirm(`Merge "${srcLabel}" into "${tgtLabel}"?\n\n"${srcLabel}" will be deleted and its data moved to "${tgtLabel}".`)) return;
+  const err = el('merge-error');
+  err.style.display = 'none';
+  try {
+    const updated = await apiFetch(`/api/devices/${targetId}/merge/${_mergeSourceId}`, { method: 'POST' });
+    const tidx = allDevices.findIndex(d => d.id === targetId);
+    if (tidx >= 0) allDevices[tidx] = updated;
+    const sidx = allDevices.findIndex(d => d.id === _mergeSourceId);
+    if (sidx >= 0) allDevices.splice(sidx, 1);
+    applyFilter();
+    closeMergeModal();
+  } catch (e) {
+    err.textContent = e.message || 'Merge failed.';
+    err.style.display = '';
+  }
 }
 
 async function saveSettings() {
@@ -408,6 +507,7 @@ function renderDevices(devices) {
       </div>
       <div class="device-footer">
         <span>${d.is_wireless ? `<span class="device-wifi-badge">WiFi</span> ` : ''}${d.is_switch ? `<span class="device-switch-badge">SW</span> ` : ''}${d.is_access_point ? `<span class="device-ap-badge">AP</span> ` : ''}${d.is_virtual && d.parent_id ? `<span class="device-vm-badge">VM</span> ` : ''}${(() => { const ls = new Date(d.last_seen + 'Z'); const tip = fmt(ls); return d.is_online ? `Online · seen <span title="${tip}">${timeAgo(ls)}</span>` : `Offline · last seen <span title="${tip}">${timeAgo(ls)}</span>`; })()}</span>
+        <button class="device-merge-btn" onclick="openMergeModal(${d.id})">Merge…</button>
         <button class="device-delete-btn" onclick="deleteDevice(${d.id})">Delete</button>
       </div>
     </div>`;

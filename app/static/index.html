@@ -159,6 +159,24 @@
 
 </main>
 
+<!-- ── merge modal ── -->
+<div id="merge-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-backdrop" onclick="closeMergeModal()"></div>
+  <div class="modal-panel" style="width:min(480px,calc(100vw - 32px))">
+    <div class="modal-header">
+      <h2>Merge device</h2>
+      <button class="modal-close" onclick="closeMergeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="merge-source-label" style="font-size:13px;margin:0"></p>
+      <p style="font-size:12px;color:var(--muted);margin:0">Select the device to keep. The source device will be deleted and its MACs, history, and connections moved to the target.</p>
+      <input id="merge-search" type="search" placeholder="Search devices…" oninput="renderMergeList()" style="width:100%" />
+      <div id="merge-list" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:4px"></div>
+      <p id="merge-error" style="color:var(--red);font-size:12px;margin:0;display:none"></p>
+    </div>
+  </div>
+</div>
+
 <!-- ── duplicates modal ── -->
 <div id="duplicates-modal" class="modal hidden" role="dialog" aria-modal="true">
   <div class="modal-backdrop" onclick="closeDuplicates()"></div>

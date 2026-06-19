@@ -625,6 +625,81 @@ def api_device(device_id: int):
         return _device_to_dict(dev, _device_ports(db, device_id), _rooms_dict(db), _device_wlans(db, device_id), macs=_device_macs(db, device_id))
 
 
+@app.post("/api/devices/{target_id}/merge/{source_id}")
+def api_merge_devices(target_id: int, source_id: int):
+    """Merge source into target: all data moved to target, source deleted."""
+    if target_id == source_id:
+        raise HTTPException(status_code=422, detail="Cannot merge a device with itself")
+    with get_db() as db:
+        target = db.get(Device, target_id)
+        source = db.get(Device, source_id)
+        if not target:
+            raise HTTPException(status_code=404, detail="Target device not found")
+        if not source:
+            raise HTTPException(status_code=404, detail="Source device not found")
+
+        # MACs: move source MACs to target (skip if already claimed elsewhere)
+        for m in db.execute(sa.select(DeviceMAC).where(DeviceMAC.device_id == source_id)).scalars().all():
+            conflict = db.execute(
+                sa.select(DeviceMAC).where(DeviceMAC.mac_address == m.mac_address, DeviceMAC.device_id != source_id)
+            ).scalar_one_or_none()
+            if not conflict:
+                m.device_id = target_id
+
+        # IP history: reassign all rows
+        db.execute(
+            sa.update(DeviceIPHistory).where(DeviceIPHistory.device_id == source_id).values(device_id=target_id)
+        )
+
+        # WLANs: reassign
+        db.execute(sa.update(Wlan).where(Wlan.device_id == source_id).values(device_id=target_id))
+
+        # Device ports: reassign (PortLinks cascade via FK)
+        db.execute(sa.update(DevicePort).where(DevicePort.device_id == source_id).values(device_id=target_id))
+
+        # Switch ports: if source is a switch, reassign its ports to target
+        db.execute(sa.update(SwitchPort).where(SwitchPort.switch_id == source_id).values(switch_id=target_id))
+
+        # parent_id references
+        db.execute(
+            sa.update(Device).where(Device.parent_id == source_id).values(parent_id=target_id)
+        )
+
+        # Topology positions: delete source node position (target keeps its own)
+        for nid in (f"sw_{source_id}", f"dev_{source_id}"):
+            pos = db.get(TopologyPosition, nid)
+            if pos:
+                db.delete(pos)
+
+        # Scalar fields: target wins if set, else take source's value
+        if not target.name and source.name:
+            target.name = source.name
+        if not target.hostname and source.hostname:
+            target.hostname = source.hostname
+        if not target.vendor and source.vendor:
+            target.vendor = source.vendor
+        if not target.mac_address and source.mac_address:
+            target.mac_address = source.mac_address
+        if target.first_seen and source.first_seen:
+            target.first_seen = min(target.first_seen, source.first_seen)
+        target.scan_count += source.scan_count
+
+        # IP: if target has no IP, take source's (clear source first to avoid UNIQUE clash)
+        if not target.ip_address and source.ip_address:
+            src_ip = source.ip_address
+            source.ip_address = None
+            db.flush()
+            target.ip_address = src_ip
+
+        db.flush()
+        db.delete(source)
+        db.flush()
+
+        rooms = _rooms_dict(db)
+        return _device_to_dict(target, _device_ports(db, target_id), rooms, _device_wlans(db, target_id),
+                               macs=_device_macs(db, target_id))
+
+
 @app.delete("/api/devices/{device_id}", status_code=204)
 def api_delete_device(device_id: int):
     with get_db() as db:
